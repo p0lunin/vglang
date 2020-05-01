@@ -1,6 +1,6 @@
 use crate::error::Error;
 use crate::parser;
-use crate::parser::{Ast, FormulaKind, Token, FormulaElement};
+use crate::parser::{Ast, Token};
 use crate::spanned::{Spanned, Span};
 use std::cmp::{max, min};
 use std::ops::{Deref, DerefMut};
@@ -522,53 +522,11 @@ fn parse_int_with_cur(
             }
             _ => Err(Error::Span(token.span)),
         },
-        Ast::Formula(f) => {
-            let ftype = formula_to_type(*f)?;
-            match ftype.inner() {
-                AllType::Int(i) => Ok(VecType::from(i.kinds))
-            }
-        }
         t => {
             dbg!(t);
             unimplemented!()
         }
     }
-}
-
-fn formula_to_type(f: Spanned<FormulaElement>) -> Result<Spanned<AllType>, Error> {
-    let FormulaElement { parent, kind } = f.inner();
-    let mut scoped_types = match parent {
-        Some(e) => parse_scoped_types(*e)?,
-        _ => vec![]
-    };
-    let cur = parse_formula_kind(kind, &scoped_types)?;
-
-    match cur.name() {
-        "val" => Ok(cur),
-        _ => Err(Error::Custom(cur.span, "last expression must be val".to_owned(), "-here".to_owned()))
-    }
-}
-
-fn parse_formula_kind(kind: Spanned<FormulaKind>, types: &[Spanned<AllType>]) -> Result<Spanned<AllType>, Error> {
-    let span = kind.span;
-    let kind = kind.inner();
-    match kind {
-        FormulaKind::Type(t) => {
-            parse_type(Spanned::new(t, span), types)
-        }
-    }
-}
-
-fn parse_scoped_types(f: Spanned<FormulaElement>) -> Result<Vec<Spanned<AllType>>, Error> {
-    let FormulaElement { parent, kind } = f.inner();
-    let mut scoped = match parent {
-        Some(e) => parse_scoped_types(*e)?,
-        _ => vec![]
-    };
-    let cur = parse_formula_kind(kind, &scoped)?;
-    scoped.push(cur);
-
-    Ok(scoped)
 }
 
 fn get_arithmetic_val(token: &Token) -> Result<Spanned<i128>, Error> {

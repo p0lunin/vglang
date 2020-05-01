@@ -45,13 +45,11 @@ pub enum Ast {
     Double(f64),
     Ident(Ident),
     Val,
-    Formula(Box<Spanned<FormulaElement>>),
     Slice(Slice)
 }
 
 #[derive(Debug, PartialEq)]
 pub enum TopLevelToken {
-    State(State),
     Type(Type),
     NewLine,
     Comment,
@@ -72,21 +70,10 @@ pub struct Type(pub Spanned<Ident>, pub Token);
 struct Var(Spanned<Ident>, Token);
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct FormulaElement {
-    pub parent: Option<Box<Spanned<FormulaElement>>>,
-    pub kind: Spanned<FormulaKind>,
-}
-
-#[derive(Debug, PartialEq, Clone)]
 pub struct Slice {
     first: Spanned<i128>,
     second: Spanned<i128>,
     last: Spanned<i128>,
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub enum FormulaKind {
-    Type(Type),
 }
 
 peg::parser! { grammar lang() for str {
@@ -106,30 +93,6 @@ peg::parser! { grammar lang() for str {
 
     pub rule type_definition(i: usize) -> Token
         = logic(i)
-
-    rule formula(i: usize) -> Token
-        = start:position!() "{" _ elem:formula_get(i) _ "}" end:position!() {
-            Token::new(Span::new(start, end), Ast::Formula(Box::new(elem)))
-        }
-
-    rule formula_get(i: usize) -> Spanned<FormulaElement> = precedence! {
-        x:(@) _ ";" _ y:@ { let mut res = y; (*res).parent = Some(Box::new(x)); res }
-        --
-        elem:formula_element(i) {elem}
-    }
-
-    rule formula_element(i: usize) -> Spanned<FormulaElement>
-        = start:position!() kind:formula_kind(i) end:position!() {
-            Spanned::new(FormulaElement { parent: None, kind }, Span::new(start, end))
-        }
-
-    rule formula_kind(i: usize) -> Spanned<FormulaKind>
-        = type_in_formula(i)
-
-    rule type_in_formula(i: usize) -> Spanned<FormulaKind>
-        = start:position!() id:ident() _ ":" _ t:type_definition(i) end:position!() {
-            Spanned::new(FormulaKind::Type(Type(id, t)), Span::new(start, end))
-        }
 
     pub rule logic(i: usize) -> Token = precedence! {
         x:(@) inli(i) "|" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Or(Box::new(x), Box::new(y))) }
@@ -167,8 +130,7 @@ peg::parser! { grammar lang() for str {
         = num() /
         s:position!() "val" e:position!() { Token::new(Span::new(s, e), Ast::Val) } /
         id:ident() { Token::new(id.span, Ast::Ident(id.inner())) } /
-        s:position!() slice:slice() e:position!() { Token::new(Span::new(s, e), Ast::Slice(slice)) } /
-        formula(i)
+        s:position!() slice:slice() e:position!() { Token::new(Span::new(s, e), Ast::Slice(slice)) }
 
     rule slice() -> Slice
         = "[" _ first:spanned_int() _ "," _ second:spanned_int() _ ".." _ last:spanned_int() _ "]" {
