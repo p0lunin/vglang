@@ -11,12 +11,12 @@ pub use parser::parse;
 use crate::error::Error;
 use crate::parser::TopLevelToken;
 use crate::spanned::Spanned;
-use crate::types::AllType;
+use crate::types::Value;
 use std::rc::Rc;
 
 pub fn parse_tokens(
     tokens: Vec<Spanned<TopLevelToken>>,
-) -> Result<Vec<Spanned<AllType>>, Vec<Error>> {
+) -> Result<Vec<Spanned<Value>>, Vec<Error>> {
     let mut errors = vec![];
     let mut types = vec![];
     // let mut state_tokens = vec![];

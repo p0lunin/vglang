@@ -1,6 +1,5 @@
 use crate::error_builder::ErrorMsgBuilder;
 use crate::spanned::Span;
-use std::fmt::{Display, Formatter};
 
 #[derive(Debug, PartialEq)]
 pub enum Error {

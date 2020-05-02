@@ -71,9 +71,9 @@ struct Var(Spanned<Ident>, Token);
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Slice {
-    first: Spanned<i128>,
-    second: Spanned<i128>,
-    last: Spanned<i128>,
+    pub first: Spanned<i128>,
+    pub second: Spanned<i128>,
+    pub last: Spanned<i128>,
 }
 
 peg::parser! { grammar lang() for str {
