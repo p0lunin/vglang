@@ -90,10 +90,17 @@ pub struct FunctionBody(Token);
 
 peg::parser! { grammar lang() for str {
     pub rule parse_lang() -> Vec<Spanned<TopLevelToken>>
-        = (type_declaration() / new_line() / comment() / FunctionDef(1) / function_impl(1))*
+        = (top_level_token())*
+
+    rule top_level_token() -> Spanned<TopLevelToken>
+        = type_declaration() / new_line() / comment() / FunctionDef(1) / function_impl(1)
 
     rule comment() -> Spanned<TopLevelToken>
-        = start:position!() "//" ([_])* new_line()? end:position!() { Spanned::new(TopLevelToken::Comment, Span::new(start, end)) }
+        = start:position!() "//" (all_except_new_line())* (new_line() / ![_]) end:position!() {
+            Spanned::new(TopLevelToken::Comment, Span::new(start, end))
+        }
+
+    rule all_except_new_line() = [_] !"\n"
 
     rule new_line() -> Spanned<TopLevelToken>
         = start:position!() "\r"? "\n" "\r"? end:position!() { Spanned::new(TopLevelToken::NewLine, Span::new(start, end)) }
@@ -191,7 +198,7 @@ peg::parser! { grammar lang() for str {
             (n, Span::new(s, e))
         }
     rule ident() -> Spanned<Ident>
-        = s:position!() ident:$(['a'..='z'|'A'..='Z'|'_'] ['a'..='z'|'A'..='Z'|'0'..='9'|'_']+) e:position!() {
+        = s:position!() ident:$(['a'..='z'|'A'..='Z'|'_'] ['a'..='z'|'A'..='Z'|'0'..='9'|'_']*) e:position!() {
             Spanned::new(Ident(String::from(ident)), Span::new(s, e))
         }
 

@@ -1,6 +1,6 @@
+use crate::error::Error;
 use crate::parser::{FunctionDef, FunctionImpl};
 use crate::spanned::Spanned;
-use crate::error::Error;
 use crate::types::Value;
 
 #[derive(Debug)]

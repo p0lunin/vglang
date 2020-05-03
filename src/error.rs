@@ -95,7 +95,6 @@ impl Error {
 }
 
 pub fn peg_error_to_showed(err: peg::error::ParseError<peg::str::LineCol>, source: &str) -> String {
-    dbg!(source.len());
     let span = Span::new(err.location.offset, err.location.offset + 1);
     let description = format!(
         "Expected one of {}, but found {:?}",

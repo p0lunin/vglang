@@ -27,7 +27,7 @@ impl Span {
 
 pub struct Spanned<T> {
     val: T,
-    pub(crate) span: Span,
+    pub span: Span,
 }
 
 impl<T> Spanned<T> {

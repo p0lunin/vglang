@@ -1,9 +1,9 @@
 mod error;
 mod error_builder;
+mod functions;
 mod parser;
 mod spanned;
 mod types;
-mod functions;
 
 pub use error::peg_error_to_showed;
 pub use parser::parse;
