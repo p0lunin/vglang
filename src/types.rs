@@ -440,7 +440,12 @@ pub fn parse_type(
     let parser::Type(name, def) = type_def.inner();
     let name_span = name.span;
     let name = Spanned::new(name.inner().0, name_span);
-    Ok(Spanned::new(parse_int(name, def, types)?, span))
+    let main_type = get_type(&def, types)?;
+    let t_type = match main_type {
+        MainType::Int => parse_int(name, def, types),
+        MainType::Type => unimplemented!()
+    }?;
+    Ok(Spanned::new(t_type, span))
 }
 
 fn parse_int(
@@ -677,7 +682,7 @@ impl Token {
     }
 }
 
-pub fn get_type(token: Token, types: &[Spanned<Value>]) -> Result<MainType, Error> {
+pub fn get_type(token: &Token, types: &[Spanned<Value>]) -> Result<MainType, Error> {
     token
         .check_type(types)
         .and_then(|t| t.ok_or(Error::NotHaveType(token.span)))
@@ -688,6 +693,7 @@ impl Token {
         match &self.ast {
             Ast::Ident(i) => match i.0.as_str() {
                 "Int" => Ok(Some(MainType::Int)),
+                "Type" => Ok(Some(MainType::Type)),
                 i => Ok(types.iter().find(|t| t.name() == i).map(|t| t.main_type())),
             },
             Ast::And(l, r) => {

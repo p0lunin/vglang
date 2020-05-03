@@ -45,12 +45,15 @@ pub enum Ast {
     Double(f64),
     Ident(Ident),
     Val,
-    Slice(Slice)
+    Slice(Slice),
+    Implication(Box<Token>, Box<Token>),
 }
 
 #[derive(Debug, PartialEq)]
 pub enum TopLevelToken {
     Type(Type),
+    FunctionDef(FunctionDef),
+    FunctionImpl(FunctionImpl),
     NewLine,
     Comment,
 }
@@ -76,9 +79,18 @@ pub struct Slice {
     pub last: Spanned<i128>,
 }
 
+#[derive(Debug, PartialEq)]
+pub struct FunctionDef(Spanned<Ident>, Box<Token>);
+
+#[derive(Debug, PartialEq)]
+pub struct FunctionImpl(Spanned<Ident>, Vec<Spanned<Ident>>, FunctionBody);
+
+#[derive(Debug, PartialEq)]
+pub struct FunctionBody(Token);
+
 peg::parser! { grammar lang() for str {
     pub rule parse_lang() -> Vec<Spanned<TopLevelToken>>
-        = (type_declaration() / new_line() / comment())*
+        = (type_declaration() / new_line() / comment() / FunctionDef(1) / function_impl(1))*
 
     rule comment() -> Spanned<TopLevelToken>
         = start:position!() "//" ([_])* new_line()? end:position!() { Spanned::new(TopLevelToken::Comment, Span::new(start, end)) }
@@ -93,6 +105,19 @@ peg::parser! { grammar lang() for str {
 
     pub rule type_definition(i: usize) -> Token
         = logic(i)
+
+    rule FunctionDef(i: usize) -> Spanned<TopLevelToken>
+        = start:position!() name:ident() _ ":" inli(i) ftype:logic(i) new_line() end:position!() {
+            Spanned::new(TopLevelToken::FunctionDef(FunctionDef(name, Box::new(ftype))), Span::new(start, end))
+        }
+
+    rule function_impl(i: usize) -> Spanned<TopLevelToken>
+        = start:position!() name:ident() __ args:(ident_space())+  _ "=" _ body:logic(i) end:position!() {
+            Spanned::new(TopLevelToken::FunctionImpl(FunctionImpl(name, args, FunctionBody(body))), Span::new(start, end))
+        }
+
+    rule ident_space() -> Spanned<Ident>
+        = i:ident() __ { i }
 
     pub rule logic(i: usize) -> Token = precedence! {
         x:(@) inli(i) "|" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Or(Box::new(x), Box::new(y))) }
@@ -118,6 +143,8 @@ peg::parser! { grammar lang() for str {
         x:(@) inli(i) "/" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Div(Box::new(x), Box::new(y))) }
         --
         x:@ inli(i) "^" inli(i) y:(@) { Token::new(x.span.extend(&y.span), Ast::Pow(Box::new(x), Box::new(y))) }
+        --
+        x:@ inli(i) "->" inli(i) y:(@) { Token::new(x.span.extend(&y.span), Ast::Implication(Box::new(x), Box::new(y)))}
         --
         start:position!() "(" inli(i) v:logic(i) inli(i) ")" end:position!() {
             Token::new(Span::new(start, end), Ast::Parenthesis(Box::new(v)))
@@ -164,7 +191,7 @@ peg::parser! { grammar lang() for str {
             (n, Span::new(s, e))
         }
     rule ident() -> Spanned<Ident>
-        = s:position!() ident:$(['a'..='z'|'A'..='Z'|'0'..='9'|'_']+) e:position!() {
+        = s:position!() ident:$(['a'..='z'|'A'..='Z'|'_'] ['a'..='z'|'A'..='Z'|'0'..='9'|'_']+) e:position!() {
             Spanned::new(Ident(String::from(ident)), Span::new(s, e))
         }
 
