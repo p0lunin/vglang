@@ -1,4 +1,9 @@
-type I64 = Int & val > -2^64/2 & val < 2^64/2-1
-type I32 = Int & val > -2^32/2 & val < 2^32/2-1
-type I16 = Int & val > -2^16/2 & val < 2^16/2-1
-type I8 = Int & val > -2^8/2 & val < 2^8/2-1
+type I64 = val > -2^64/2 & val < 2^64/2-1
+type I32 = val > -2^32/2 & val < 2^32/2-1
+type I16 = val > -2^16/2 & val < 2^16/2-1
+type I8 = val > -2^8/2 & val < 2^8/2-1
+
+type U64 = val >= 0 & val < 2^64
+type U32 = val >= 0 & val < 2^32
+type U16 = val >= 0 & val < 2^16
+type U8 = val >= 0 & val < 2^8
