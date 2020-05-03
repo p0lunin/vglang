@@ -216,7 +216,6 @@ peg::parser! { grammar lang() for str {
 
 use crate::spanned::{Span, Spanned};
 use lang::{arithmetic, num, parse_lang, type_declaration};
-use std::convert::TryFrom;
 use std::fmt::{Debug, Formatter};
 use std::ops::Deref;
 

@@ -57,8 +57,8 @@ impl Value {
 }
 
 mod int {
-    use super::{Error, Int, Spanned, Token, Type};
-    use crate::types::{Value, VecType};
+    use super::{Error, Int, Type};
+    use crate::types::Value;
     use itertools::Itertools;
 
     pub fn add(left: Type<Int>, right: Value) -> Result<Type<Int>, Error> {
@@ -106,7 +106,7 @@ mod int {
 
 // Rust not allowed 'type' in identifiers
 mod ttype {
-    use super::{Error, Int, Spanned, Token, Type};
+    use super::{Error, Type};
     use crate::types::Value;
 
     pub fn add(_: Type<()>, right: Value) -> Result<Type<()>, Error> {
@@ -135,7 +135,7 @@ mod ttype {
 }
 
 mod unknown {
-    use super::{Error, Int, Spanned, Type, Value};
+    use super::{Error, Type, Value};
 
     pub fn add(_: Type<()>, right: Value) -> Result<Type<()>, Error> {
         Err(Error::Custom(
@@ -233,15 +233,6 @@ pub enum Int {
         high: Spanned<i128>,
     },
     Slice(Spanned<Slice>),
-}
-
-impl Int {
-    fn is_empty(&self) -> bool {
-        match self {
-            Int::Bound(OneRangeIntBound::None) => true,
-            _ => false,
-        }
-    }
 }
 
 impl Spanned<Int> {
@@ -654,7 +645,7 @@ fn parse_type_helper(token: Token, types: &[Spanned<Value>]) -> Result<Value, Er
                 .map(|value| one_bound(OneRangeIntBound::Low(value + 1), span)),
             (a, Token { ast: Ast::Val, .. }) => get_arithmetic_val(&a)
                 .map(|value| one_bound(OneRangeIntBound::High(value - 1), span)),
-            r => Err(Error::Span(token.span)),
+            _ => Err(Error::Span(token.span)),
         },
         Ast::Le(l, r) => match ((*l), (*r)) {
             (Token { ast: Ast::Val, .. }, a) => get_arithmetic_val(&a)
@@ -669,7 +660,7 @@ fn parse_type_helper(token: Token, types: &[Spanned<Value>]) -> Result<Value, Er
                     .map(|value| one_bound(OneRangeIntBound::Low(value), span)),
                 (a, Token { ast: Ast::Val, .. }) => get_arithmetic_val(&a)
                     .map(|value| one_bound(OneRangeIntBound::High(value), span)),
-                r => Err(Error::Span(token.span)),
+                _ => Err(Error::Span(token.span)),
             }
         }
         Ast::LeEq(l, r) => {
@@ -773,9 +764,6 @@ impl<T> VecType<T> {
     pub fn one(t: T) -> Self {
         Self(vec![t])
     }
-    pub fn to_vec(self) -> Vec<T> {
-        self.0
-    }
 }
 
 impl<T> FromIterator<T> for VecType<T> {
@@ -859,47 +847,6 @@ impl Token {
             }),
             Ast::Neg(t) => Ok(-t.eval_arithmetic()?),
             _ => Err(self.span),
-        }
-    }
-}
-
-pub fn get_type(token: &Token, types: &[Spanned<Value>]) -> Result<MainType, Error> {
-    token
-        .check_type(types)
-        .and_then(|t| t.ok_or(Error::NotHaveType(token.span)))
-}
-
-impl Token {
-    fn check_type(&self, types: &[Spanned<Value>]) -> Result<Option<MainType>, Error> {
-        match &self.ast {
-            Ast::Ident(i) => match i.0.as_str() {
-                "Int" => Ok(Some(MainType::Int)),
-                "Type" => Ok(Some(MainType::Type)),
-                i => Ok(types.iter().find(|t| t.name() == i).map(|t| t.main_type())),
-            },
-            Ast::And(l, r) => {
-                let type1 = l.check_type(types)?;
-                let type2 = r.check_type(types)?;
-                match (type1, type2) {
-                    (None, None) => Ok(None),
-                    (Some(t), None) => Ok(Some(t)),
-                    (None, Some(t)) => Ok(Some(t)),
-                    (Some(t1), Some(t2)) if t1 == t2 => Ok(Some(t1)),
-                    (Some(t1), Some(t2)) => Err(Error::DifferentTypes(l.span, r.span)),
-                }
-            }
-            Ast::Or(l, r) => {
-                let type1 = l.check_type(types)?;
-                let type2 = r.check_type(types)?;
-                match (type1, type2) {
-                    (None, None) => Err(Error::NotHaveType(l.span)),
-                    (Some(t), None) => Err(Error::NotHaveType(r.span)),
-                    (None, Some(t)) => Err(Error::NotHaveType(l.span)),
-                    (Some(t1), Some(t2)) if t1 == t2 => Ok(Some(t1)),
-                    (Some(t1), Some(t2)) => Err(Error::DifferentTypes(l.span, r.span)),
-                }
-            }
-            _ => Ok(None),
         }
     }
 }

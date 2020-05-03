@@ -57,7 +57,7 @@ impl Error {
                 .fill_str_error_size_times("^")
                 .add(&format!("- here"))
                 .build(),
-            Error::DifferentTypes(span, t) => ErrorMsgBuilder::new(*span, source)
+            Error::DifferentTypes(span, _) => ErrorMsgBuilder::new(*span, source)
                 .error_kind("Error")
                 .description(&format!("Different types"))
                 .new_line()

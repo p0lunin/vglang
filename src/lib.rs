@@ -12,7 +12,6 @@ use crate::error::Error;
 use crate::parser::TopLevelToken;
 use crate::spanned::Spanned;
 use crate::types::Value;
-use std::rc::Rc;
 
 pub fn parse_tokens(
     tokens: Vec<Spanned<TopLevelToken>>,
