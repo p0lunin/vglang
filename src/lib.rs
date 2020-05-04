@@ -1,6 +1,5 @@
 mod error;
 mod error_builder;
-mod functions;
 mod parser;
 mod spanned;
 mod types;
@@ -11,11 +10,11 @@ pub use parser::parse;
 use crate::error::Error;
 use crate::parser::TopLevelToken;
 use crate::spanned::Spanned;
-use crate::types::Value;
+use crate::types::Type;
 
 pub fn parse_tokens(
     tokens: Vec<Spanned<TopLevelToken>>,
-) -> Result<Vec<Spanned<Value>>, Vec<Error>> {
+) -> Result<Vec<Spanned<Type>>, Vec<Error>> {
     let mut errors = vec![];
     let mut types = vec![];
     tokens.into_iter().for_each(|token| {
