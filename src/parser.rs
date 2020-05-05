@@ -80,13 +80,13 @@ pub struct Slice {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct FunctionDef(Spanned<Ident>, Box<Token>);
+pub struct FunctionDef(pub Spanned<Ident>, pub Box<Token>);
 
 #[derive(Debug, PartialEq)]
-pub struct FunctionImpl(Spanned<Ident>, Vec<Spanned<Ident>>, FunctionBody);
+pub struct FunctionImpl(pub Spanned<Ident>, pub Vec<Spanned<Ident>>, pub FunctionBody);
 
 #[derive(Debug, PartialEq)]
-pub struct FunctionBody(Token);
+pub struct FunctionBody(pub Token);
 
 peg::parser! { grammar lang() for str {
     pub rule parse_lang() -> Vec<Spanned<TopLevelToken>>
@@ -119,7 +119,7 @@ peg::parser! { grammar lang() for str {
         }
 
     rule function_impl(i: usize) -> Spanned<TopLevelToken>
-        = start:position!() name:ident() __ args:(ident_space())+  _ "=" _ body:logic(i) end:position!() {
+        = start:position!() name:ident() __ args:(ident_space())*  _ "=" _ body:logic(i) end:position!() {
             Spanned::new(TopLevelToken::FunctionImpl(FunctionImpl(name, args, FunctionBody(body))), Span::new(start, end))
         }
 

@@ -67,6 +67,13 @@ impl Type {
     pub fn op_implication(self, value: Type) -> Result<Self, Error> {
         Ok(self.implication(value))
     }
+
+    pub fn count_args(&self) -> u8 {
+        match self {
+            Type::Function(t) => 1 + t.kinds.first().unwrap().return_value.count_args(),
+            _ => 0,
+        }
+    }
 }
 
 pub trait TypeOperable<T>: Sized {
@@ -134,7 +141,7 @@ impl<T> TypeKind<T> {
             kinds: VecType(vec![]),
         }
     }
-    fn from_kinds(kinds: VecType<Spanned<T>>) -> Self {
+    pub fn from_kinds(kinds: VecType<Spanned<T>>) -> Self {
         Self { name: None, kinds }
     }
     pub fn fmap<F: FnMut(Spanned<T>) -> Result<Spanned<T>, E>, E>(self, f: F) -> Result<Self, E> {
@@ -233,7 +240,7 @@ pub fn parse_type(
     Ok(Spanned::new(t_type, span))
 }
 
-fn parse_type_helper(token: Token, types: &[Spanned<Type>]) -> Result<Type, Error> {
+pub fn parse_type_helper(token: Token, types: &[Spanned<Type>]) -> Result<Type, Error> {
     let span = token.span;
     match token.ast {
         Ast::And(l, r) => parse_type_helper(*l, types)

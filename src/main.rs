@@ -39,7 +39,7 @@ fn main() {
             return;
         }
     };
-    let types = match parse_tokens(ast) {
+    let (types, objects) = match parse_tokens(ast) {
         Ok(t) => t,
         Err(errs) => {
             errs.into_iter()
@@ -48,5 +48,6 @@ fn main() {
         }
     };
     println!("Your types: {:#?}", types);
+    println!("Your objects: {:#?}", objects);
     // println!("Your states: {:#?}", states);
 }

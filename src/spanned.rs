@@ -37,6 +37,12 @@ impl<T> Spanned<T> {
     pub fn inner(self) -> T {
         self.val
     }
+    pub fn map<F: FnOnce(T) -> U, U>(self, f: F) -> Spanned<U> {
+        Spanned {
+            val: f(self.val),
+            span: self.span
+        }
+    }
 }
 
 impl<T: Debug> Debug for Spanned<T> {
