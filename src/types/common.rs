@@ -13,10 +13,10 @@ use std::rc::Rc;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Type {
-    Function(TypeKind<Function>),
+    Function(OneTypeKind<Function>),
     Int(TypeKind<Int>),
-    Type(TypeKind<TypeType>),
-    Unknown(TypeKind<Unknown>),
+    Type(OneTypeKind<TypeType>),
+    Unknown(OneTypeKind<Unknown>),
     AnotherType(Rc<Spanned<Type>>),
 }
 
@@ -99,7 +99,7 @@ impl Type {
 
     pub fn count_args(&self) -> u8 {
         match self {
-            Type::Function(t) => 1 + t.kinds.first().unwrap().return_value.count_args(),
+            Type::Function(t) => 1 + t.kind.return_value.count_args(),
             _ => 0,
         }
     }
@@ -110,7 +110,7 @@ impl Spanned<Type> {
         match &***self {
             Type::Function(t) => {
                 let mut vec = vec![];
-                let f = t.kinds.first().unwrap();
+                let f = &t.kind;
                 vec.push(f.get_value.clone());
                 vec.extend(f.return_value.args_types());
                 vec
@@ -130,13 +130,13 @@ pub trait TypeOperable<T>: Sized {
 impl Type {
     pub fn implication(self, other: Self) -> Self {
         let span = self.span().extend(&other.span());
-        Type::Function(TypeKind::from_kinds(VecType::one(Spanned::new(
+        Type::Function(OneTypeKind::from_kind(Spanned::new(
             Function {
                 get_value: Rc::new(Spanned::new(self, span)),
                 return_value: Rc::new(Spanned::new(other, span)),
             },
             span,
-        ))))
+        )))
     }
 }
 
@@ -184,6 +184,25 @@ pub struct TypeKind<T> {
     pub kinds: VecType<Spanned<T>>,
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub struct OneTypeKind<T> {
+    pub name: Option<Spanned<String>>,
+    pub kind: Spanned<T>,
+}
+
+impl<T> OneTypeKind<T> {
+    pub fn from_kind(kind: Spanned<T>) -> Self {
+        Self { name: None, kind }
+    }
+    pub fn fmap<F: FnOnce(Spanned<T>) -> Result<Spanned<T>, E>, E>(self, f: F) -> Result<Self, E> {
+        let OneTypeKind { name, kind } = self;
+        f(kind).map(|kind| Self { kind, name })
+    }
+    pub fn span(&self) -> Span {
+        self.kind.span
+    }
+}
+
 impl<T> TypeKind<T> {
     pub fn empty() -> Self {
         Self {
@@ -214,7 +233,7 @@ impl<T> TypeKind<T> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeType;
 
-impl TypeOperable<TypeType> for TypeKind<TypeType> {
+impl TypeOperable<TypeType> for OneTypeKind<TypeType> {
     fn add(self, right: Type) -> Result<Self, Error> {
         Err(Error::Custom(
             right.span(),
@@ -243,7 +262,7 @@ impl TypeOperable<TypeType> for TypeKind<TypeType> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Unknown;
 
-impl TypeOperable<Unknown> for TypeKind<Unknown> {
+impl TypeOperable<Unknown> for OneTypeKind<Unknown> {
     fn add(self, right: Type) -> Result<Self, Error> {
         Err(Error::Custom(
             right.span(),
@@ -309,7 +328,7 @@ pub fn parse_type_helper(token: Token, types: &[Rc<Spanned<Type>>]) -> Result<Ty
         Ast::Parenthesis(t) => parse_type_helper(*t, types),
         Ast::Ident(i) => match i.0.as_str() {
             "Int" => Ok(Type::Int(TypeKind::empty())),
-            "Type" => Ok(Type::Type(TypeKind::empty())),
+            "Type" => Ok(Type::Type(OneTypeKind::from_kind(Spanned::new(TypeType, token.span)))),
             name => match types.iter().find(|t| t.name() == name) {
                 Some(t) => Ok(Type::AnotherType(t.clone())),
                 None => Err(Error::Custom(

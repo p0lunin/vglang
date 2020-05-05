@@ -1,7 +1,7 @@
 use crate::error::Error;
 use crate::parser::{FunctionDef, FunctionImpl};
 use crate::spanned::Spanned;
-use crate::types::{Type, TypeKind, TypeOperable};
+use crate::types::{Type, OneTypeKind, TypeOperable};
 use std::rc::Rc;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -10,7 +10,7 @@ pub struct Function {
     pub return_value: Rc<Spanned<Type>>,
 }
 
-impl TypeOperable<Function> for TypeKind<Function> {
+impl TypeOperable<Function> for OneTypeKind<Function> {
     fn add(self, right: Type) -> Result<Self, Error> {
         Err(Error::Custom(
             right.span(),
