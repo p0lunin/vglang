@@ -1,5 +1,5 @@
 use clap::{App, Arg};
-use fsmcreator::{parse, parse_tokens, peg_error_to_showed};
+use fsmcreator::{parse, parse_tokens, peg_error_to_showed, context_from_types, type_check_objects};
 use std::fs::File;
 use std::io::Read;
 
@@ -47,7 +47,18 @@ fn main() {
             return;
         }
     };
-    println!("Your types: {:#?}", types);
+    println!("Your types");
+    types.iter().for_each(|ty| {
+        println!("{}: {}\n", ty.name(), ty);
+    });
+    let ctx = context_from_types(types);
+    match type_check_objects(&objects, Some(ctx)) {
+        Err(e) => {
+            println!("{}", e.display(&data));
+            return;
+        }
+        Ok(()) => {}
+    }
     println!("Your objects: {:#?}", objects);
     // println!("Your states: {:#?}", states);
 }

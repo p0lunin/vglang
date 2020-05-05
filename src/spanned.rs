@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Formatter, Display};
 use std::ops::{Add, Deref, DerefMut, Sub};
 
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -46,6 +46,12 @@ impl<T> Spanned<T> {
 }
 
 impl<T: Debug> Debug for Spanned<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        self.val.fmt(f)
+    }
+}
+
+impl<T: Display> Display for Spanned<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         self.val.fmt(f)
     }

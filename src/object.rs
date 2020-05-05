@@ -6,13 +6,14 @@ use crate::types::{
 };
 use std::rc::Rc;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum AllObject {
-    Type(Object<Type>),
+    Type(Object<Rc<Spanned<Type>>>),
     Function(Object<FunctionObject>),
+    Var(Object<Var>),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Object<T: Objectable> {
     pub object: T,
     pub object_type: Rc<Spanned<T::Type>>,
@@ -22,36 +23,38 @@ pub trait Objectable {
     type Type;
 }
 
-impl Objectable for Type {
+impl Objectable for Rc<Spanned<Type>> {
     type Type = TypeType;
 }
+
 impl Objectable for TypeType {
     type Type = TypeType;
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct FunctionObject {
-    name: Spanned<String>,
-    args: Vec<Object<Var>>,
-    body: Expr,
+    pub name: Spanned<String>,
+    pub args: Vec<Object<Var>>,
+    pub return_value: Rc<Spanned<Type>>,
+    pub body: Expr,
 }
 impl Objectable for FunctionObject {
     type Type = Type;
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Expr {
     Int(Object<IntObject>),
     Add(Box<Expr>, Box<Expr>),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Var(Spanned<Ident>);
 impl Objectable for Var {
     type Type = Type;
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct IntObject {
     data: Spanned<i128>,
 }
@@ -70,7 +73,8 @@ pub fn parse_function(
     let func_type = Rc::new(Spanned::new(parse_type_helper(*def, types)?, def_span));
     let count_args = func_type.count_args();
     let FunctionImpl(impl_name, args, body) = fimpl;
-    let arg_types = func_type.args_types();
+    let mut arg_types = func_type.args_types();
+    let return_type = arg_types.pop().unwrap();
     match args.len() == count_args as usize {
         false => Err(Error::Custom(
             impl_name.span,
@@ -88,6 +92,7 @@ pub fn parse_function(
                         object_type: t,
                     })
                     .collect(),
+                return_value: return_type,
                 body: parse_expr(body.0)?,
             },
             object_type: func_type,

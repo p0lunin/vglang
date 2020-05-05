@@ -6,6 +6,7 @@ use crate::types::{TypeKind, TypeOperable};
 use itertools::Itertools;
 use std::cmp::{max, min};
 use std::ops::Add;
+use std::fmt::{Display, Formatter};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Int {
@@ -16,6 +17,17 @@ pub enum Int {
         high: Spanned<i128>,
     },
     Slice(Spanned<Slice>),
+}
+
+impl Display for Int {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match self {
+            Int::Value(i) => i.fmt(f),
+            Int::Bound(i) => i.fmt(f),
+            Int::KnownBound { low, high } => f.write_str(&format!("val>={}&val<={}", low, high)),
+            Int::Slice(s) => f.write_str(&format!("val={{from: {}; step: {}; to: {};}}", s.from, s.step, s.to)),
+        }
+    }
 }
 
 impl TypeOperable<Int> for TypeKind<Int> {
@@ -368,6 +380,17 @@ pub enum OneRangeIntBound {
     NotEqual(Spanned<i128>),
     Low(Spanned<i128>),
     High(Spanned<i128>),
+}
+
+impl Display for OneRangeIntBound {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match self {
+            OneRangeIntBound::None => write!(f, "Int"),
+            OneRangeIntBound::NotEqual(i) => write!(f, "val!={}", i),
+            OneRangeIntBound::Low(i) => write!(f, "val>={}", i),
+            OneRangeIntBound::High(i) => write!(f, "val<={}", i),
+        }
+    }
 }
 
 impl OneRangeIntBound {

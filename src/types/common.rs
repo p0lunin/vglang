@@ -10,6 +10,7 @@ use std::convert::TryFrom;
 use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
+use std::fmt::{Display, Formatter, Debug};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Type {
@@ -18,6 +19,33 @@ pub enum Type {
     Type(OneTypeKind<TypeType>),
     Unknown(OneTypeKind<Unknown>),
     AnotherType(Rc<Spanned<Type>>),
+}
+
+impl Type {
+    pub fn is_part_of(&self, other: &Type) -> bool {
+        match (self, other) {
+            (Type::Function(l), Type::Function(r)) => {
+                unimplemented!()
+            }
+            (Type::Int(l), Type::Int(r)) => unimplemented!(),
+            (Type::Type(_), Type::Type(_)) => true,
+            (Type::AnotherType(l), r) => l.is_part_of(r),
+            (l, Type::AnotherType(r)) => l.is_part_of(r),
+            _ => false,
+        }
+    }
+}
+
+impl Display for Type {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match self {
+            Type::Function(func) => Display::fmt(func, f),
+            Type::Int(t) => Display::fmt(t, f),
+            Type::Type(_) => f.write_str("Type"),
+            Type::Unknown(_) => f.write_str("Unknown"),
+            Type::AnotherType(t) => f.write_str(t.name())
+        }
+    }
 }
 
 impl Type {
@@ -184,10 +212,27 @@ pub struct TypeKind<T> {
     pub kinds: VecType<Spanned<T>>,
 }
 
+impl<T: Display> Display for TypeKind<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match &self.name {
+            Some(name) => f.write_str(&name),
+            None => {
+                f.write_str(&self.kinds.iter().map(ToString::to_string).collect::<Vec<_>>().join(" & "))
+            }
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct OneTypeKind<T> {
     pub name: Option<Spanned<String>>,
     pub kind: Spanned<T>,
+}
+
+impl<T: Display> Display for OneTypeKind<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        Display::fmt(&self.kind, f)
+    }
 }
 
 impl<T> OneTypeKind<T> {

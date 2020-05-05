@@ -8,6 +8,7 @@ mod types;
 
 pub use error::peg_error_to_showed;
 pub use parser::parse;
+pub use type_check::{type_check_objects, context_from_types};
 
 use crate::error::Error;
 use crate::object::{parse_function, AllObject};
