@@ -2,13 +2,13 @@ use crate::error::Error;
 use crate::parser;
 use crate::parser::{Ast, Token};
 use crate::spanned::{Span, Spanned};
+use crate::types::function::Function;
+use crate::types::int::{Int, OneRangeIntBound, Slice};
+use crate::types::vec_type::VecType;
 use std::cmp::{max, min};
 use std::convert::TryFrom;
 use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut};
-use crate::types::vec_type::VecType;
-use crate::types::int::{OneRangeIntBound, Slice, Int};
-use crate::types::function::Function;
 use std::rc::Rc;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -47,7 +47,7 @@ impl Type {
             Type::Type(t) => t.name = None,
             Type::Unknown(t) => t.name = None,
             Type::Function(t) => t.name = None,
-            Type::AnotherType(t) => unimplemented!()
+            Type::AnotherType(t) => unimplemented!(),
         }
     }
 
@@ -105,6 +105,22 @@ impl Type {
     }
 }
 
+impl Spanned<Type> {
+    pub fn args_types(self: &Rc<Spanned<Type>>) -> Vec<Rc<Spanned<Type>>> {
+        match &***self {
+            Type::Function(t) => {
+                let mut vec = vec![];
+                let f = t.kinds.first().unwrap();
+                vec.push(f.get_value.clone());
+                vec.extend(f.return_value.args_types());
+                vec
+            }
+            Type::AnotherType(t) => vec![t.clone()],
+            _ => vec![self.clone()],
+        }
+    }
+}
+
 pub trait TypeOperable<T>: Sized {
     fn add(self, right: Type) -> Result<Self, Error>;
     fn and(self, right: Type) -> Result<Self, Error>;
@@ -114,10 +130,13 @@ pub trait TypeOperable<T>: Sized {
 impl Type {
     pub fn implication(self, other: Self) -> Self {
         let span = self.span().extend(&other.span());
-        Type::Function(TypeKind::from_kinds(VecType::one(Spanned::new(Function {
-            get_value: self,
-            return_value: other
-        }, span))))
+        Type::Function(TypeKind::from_kinds(VecType::one(Spanned::new(
+            Function {
+                get_value: Rc::new(Spanned::new(self, span)),
+                return_value: Rc::new(Spanned::new(other, span)),
+            },
+            span,
+        ))))
     }
 }
 
@@ -144,7 +163,7 @@ impl Type {
                 .as_ref()
                 .map(|s| s.as_str())
                 .unwrap_or("anonymous type"),
-            Type::AnotherType(i) => i.name()
+            Type::AnotherType(i) => i.name(),
         }
     }
     // TODO: remove it
@@ -154,7 +173,7 @@ impl Type {
             Type::Type(_) => MainType::Type,
             Type::Unknown(_) => MainType::Unknown,
             Type::Function(_) => MainType::Function,
-            Type::AnotherType(t) => t.main_type()
+            Type::AnotherType(t) => t.main_type(),
         }
     }
 }
@@ -291,11 +310,13 @@ pub fn parse_type_helper(token: Token, types: &[Rc<Spanned<Type>>]) -> Result<Ty
         Ast::Ident(i) => match i.0.as_str() {
             "Int" => Ok(Type::Int(TypeKind::empty())),
             "Type" => Ok(Type::Type(TypeKind::empty())),
-            name => {
-                match types.iter().find(|t| t.name() == name) {
-                    Some(t) => Ok(Type::AnotherType(t.clone())),
-                    None => Err(Error::Custom(token.span, format!("Type {} not found", name), "-this".to_owned()))
-                }
+            name => match types.iter().find(|t| t.name() == name) {
+                Some(t) => Ok(Type::AnotherType(t.clone())),
+                None => Err(Error::Custom(
+                    token.span,
+                    format!("Type {} not found", name),
+                    "-this".to_owned(),
+                )),
             },
         },
         Ast::Gr(l, r) => match ((*l), (*r)) {
@@ -372,13 +393,9 @@ pub fn parse_type_helper(token: Token, types: &[Rc<Spanned<Type>>]) -> Result<Ty
                 )))),
             })
         }
-        Ast::Implication(l, r) => {
-            parse_type_helper(*l, types).and_then(|left| {
-                parse_type_helper(*r, types).and_then(|right| {
-                    left.op_implication(right)
-                })
-            })
-        }
+        Ast::Implication(l, r) => parse_type_helper(*l, types).and_then(|left| {
+            parse_type_helper(*r, types).and_then(|right| left.op_implication(right))
+        }),
         t => {
             dbg!(t);
             unimplemented!()

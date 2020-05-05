@@ -1,12 +1,13 @@
 use crate::error::Error;
 use crate::parser::{FunctionDef, FunctionImpl};
 use crate::spanned::Spanned;
-use crate::types::{Type, TypeOperable, TypeKind};
+use crate::types::{Type, TypeKind, TypeOperable};
+use std::rc::Rc;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Function {
-    pub get_value: Type,
-    pub return_value: Type
+    pub get_value: Rc<Spanned<Type>>,
+    pub return_value: Rc<Spanned<Type>>,
 }
 
 impl TypeOperable<Function> for TypeKind<Function> {

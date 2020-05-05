@@ -1,11 +1,11 @@
+use crate::error::Error;
 use crate::spanned::Spanned;
 use crate::types::common::Type;
 use crate::types::vec_type::VecType;
-use crate::error::Error;
-use std::cmp::{max, min};
 use crate::types::{TypeKind, TypeOperable};
-use std::ops::Add;
 use itertools::Itertools;
+use std::cmp::{max, min};
+use std::ops::Add;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Int {

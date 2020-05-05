@@ -1,20 +1,21 @@
 mod error;
 mod error_builder;
+mod object;
 mod parser;
 mod spanned;
+mod type_check;
 mod types;
-mod object;
 
 pub use error::peg_error_to_showed;
 pub use parser::parse;
 
 use crate::error::Error;
+use crate::object::{parse_function, AllObject};
 use crate::parser::TopLevelToken;
 use crate::spanned::Spanned;
 use crate::types::Type;
-use crate::object::{AllObject, parse_function};
-use std::collections::{VecDeque, LinkedList};
 use itertools::Itertools;
+use std::collections::{LinkedList, VecDeque};
 use std::rc::Rc;
 
 pub fn parse_tokens(
@@ -41,7 +42,11 @@ pub fn parse_tokens(
         let (idx, _) = match function_impls.iter().find_position(|i| i.0 == d.0) {
             Some(d) => d,
             None => {
-                errors.push(Error::Custom(d.0.span, format!("Cannot find impl for function {}", d.0.inner().0), "-here".to_owned()));
+                errors.push(Error::Custom(
+                    d.0.span,
+                    format!("Cannot find impl for function {}", d.0.inner().0),
+                    "-here".to_owned(),
+                ));
                 return;
             }
         };

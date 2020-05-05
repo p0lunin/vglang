@@ -40,7 +40,7 @@ impl<T> Spanned<T> {
     pub fn map<F: FnOnce(T) -> U, U>(self, f: F) -> Spanned<U> {
         Spanned {
             val: f(self.val),
-            span: self.span
+            span: self.span,
         }
     }
 }

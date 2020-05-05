@@ -83,7 +83,11 @@ pub struct Slice {
 pub struct FunctionDef(pub Spanned<Ident>, pub Box<Token>);
 
 #[derive(Debug, PartialEq)]
-pub struct FunctionImpl(pub Spanned<Ident>, pub Vec<Spanned<Ident>>, pub FunctionBody);
+pub struct FunctionImpl(
+    pub Spanned<Ident>,
+    pub Vec<Spanned<Ident>>,
+    pub FunctionBody,
+);
 
 #[derive(Debug, PartialEq)]
 pub struct FunctionBody(pub Token);

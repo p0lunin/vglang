@@ -1,8 +1,8 @@
-use std::ops::{Deref, DerefMut};
-use std::iter::FromIterator;
+use crate::error::Error;
 use crate::spanned::Spanned;
 use crate::types::int::{Int, Slice};
-use crate::error::Error;
+use std::iter::FromIterator;
+use std::ops::{Deref, DerefMut};
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct VecType<T>(pub Vec<T>);
@@ -40,7 +40,9 @@ impl<T> VecType<T> {
     pub fn one(t: T) -> Self {
         Self(vec![t])
     }
-    pub fn inner(self) -> Vec<T> { self.0 }
+    pub fn inner(self) -> Vec<T> {
+        self.0
+    }
 }
 
 impl<T> FromIterator<T> for VecType<T> {
