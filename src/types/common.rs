@@ -17,6 +17,7 @@ pub enum Type {
     Int(TypeKind<Int>),
     Type(TypeKind<TypeType>),
     Unknown(TypeKind<Unknown>),
+    AnotherType(Rc<Spanned<Type>>),
 }
 
 impl Type {
@@ -26,6 +27,7 @@ impl Type {
             Type::Type(t) => t.span(),
             Type::Unknown(u) => u.span(),
             Type::Function(t) => t.span(),
+            Type::AnotherType(t) => t.span(),
         }
     }
 
@@ -35,6 +37,17 @@ impl Type {
             Type::Type(t) => t.name = Some(name),
             Type::Unknown(t) => t.name = Some(name),
             Type::Function(t) => t.name = Some(name),
+            Type::AnotherType(t) => {}
+        }
+    }
+
+    pub fn remove_name(&mut self) {
+        match self {
+            Type::Int(t) => t.name = None,
+            Type::Type(t) => t.name = None,
+            Type::Unknown(t) => t.name = None,
+            Type::Function(t) => t.name = None,
+            Type::AnotherType(t) => unimplemented!()
         }
     }
 
@@ -44,6 +57,11 @@ impl Type {
             Type::Type(t) => t.add(value).map(Type::Type),
             Type::Unknown(t) => t.add(value).map(Type::Unknown),
             Type::Function(t) => t.add(value).map(Type::Function),
+            Type::AnotherType(t) => {
+                let mut inner = (**t).clone();
+                inner.remove_name();
+                inner.op_add(value)
+            }
         }
     }
 
@@ -53,6 +71,11 @@ impl Type {
             Type::Type(t) => t.and(value).map(Type::Type),
             Type::Unknown(t) => t.and(value).map(Type::Unknown),
             Type::Function(t) => t.and(value).map(Type::Function),
+            Type::AnotherType(t) => {
+                let mut inner = (**t).clone();
+                inner.remove_name();
+                inner.op_and(value)
+            }
         }
     }
 
@@ -62,6 +85,11 @@ impl Type {
             Type::Type(t) => t.or(value).map(Type::Type),
             Type::Unknown(t) => t.or(value).map(Type::Unknown),
             Type::Function(t) => t.or(value).map(Type::Function),
+            Type::AnotherType(t) => {
+                let mut inner = (**t).clone();
+                inner.remove_name();
+                inner.op_or(value)
+            }
         }
     }
 
@@ -116,6 +144,7 @@ impl Type {
                 .as_ref()
                 .map(|s| s.as_str())
                 .unwrap_or("anonymous type"),
+            Type::AnotherType(i) => i.name()
         }
     }
     // TODO: remove it
@@ -125,6 +154,7 @@ impl Type {
             Type::Type(_) => MainType::Type,
             Type::Unknown(_) => MainType::Unknown,
             Type::Function(_) => MainType::Function,
+            Type::AnotherType(t) => t.main_type()
         }
     }
 }
@@ -261,7 +291,12 @@ pub fn parse_type_helper(token: Token, types: &[Rc<Spanned<Type>>]) -> Result<Ty
         Ast::Ident(i) => match i.0.as_str() {
             "Int" => Ok(Type::Int(TypeKind::empty())),
             "Type" => Ok(Type::Type(TypeKind::empty())),
-            _ => Err(Error::Span(token.span)),
+            name => {
+                match types.iter().find(|t| t.name() == name) {
+                    Some(t) => Ok(Type::AnotherType(t.clone())),
+                    None => Err(Error::Custom(token.span, format!("Type {} not found", name), "-this".to_owned()))
+                }
+            },
         },
         Ast::Gr(l, r) => match ((*l), (*r)) {
             (Token { ast: Ast::Val, .. }, a) => get_arithmetic_val(&a)
