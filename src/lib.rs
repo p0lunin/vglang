@@ -15,10 +15,11 @@ use crate::types::Type;
 use crate::object::{AllObject, parse_function};
 use std::collections::{VecDeque, LinkedList};
 use itertools::Itertools;
+use std::rc::Rc;
 
 pub fn parse_tokens(
     tokens: Vec<Spanned<TopLevelToken>>,
-) -> Result<(Vec<Spanned<Type>>, Vec<AllObject>), Vec<Error>> {
+) -> Result<(Vec<Rc<Spanned<Type>>>, Vec<AllObject>), Vec<Error>> {
     let mut errors = vec![];
     let mut types = vec![];
     let mut function_defs = vec![];

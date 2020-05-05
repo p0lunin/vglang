@@ -9,6 +9,7 @@ use std::ops::{Deref, DerefMut};
 use crate::types::vec_type::VecType;
 use crate::types::int::{OneRangeIntBound, Slice, Int};
 use crate::types::function::Function;
+use std::rc::Rc;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Type {
@@ -229,18 +230,18 @@ pub enum MainType {
 
 pub fn parse_type(
     type_def: Spanned<parser::Type>,
-    types: &[Spanned<Type>],
-) -> Result<Spanned<Type>, Error> {
+    types: &[Rc<Spanned<Type>>],
+) -> Result<Rc<Spanned<Type>>, Error> {
     let span = type_def.span;
     let parser::Type(name, def) = type_def.inner();
     let name_span = name.span;
     let name = Spanned::new(name.inner().0, name_span);
     let mut t_type = parse_type_helper(def, types)?;
     t_type.set_name(name);
-    Ok(Spanned::new(t_type, span))
+    Ok(Rc::new(Spanned::new(t_type, span)))
 }
 
-pub fn parse_type_helper(token: Token, types: &[Spanned<Type>]) -> Result<Type, Error> {
+pub fn parse_type_helper(token: Token, types: &[Rc<Spanned<Type>>]) -> Result<Type, Error> {
     let span = token.span;
     match token.ast {
         Ast::And(l, r) => parse_type_helper(*l, types)

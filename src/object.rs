@@ -2,6 +2,7 @@ use crate::spanned::Spanned;
 use crate::types::{Type, TypeType, TypeOperable, parse_type, parse_type_helper, TypeKind, VecType, Int};
 use crate::parser::{FunctionDef, FunctionImpl, Token, Ast};
 use crate::error::Error;
+use std::rc::Rc;
 
 #[derive(Debug, PartialEq)]
 pub enum AllObject {
@@ -55,7 +56,7 @@ impl Objectable for IntObject {
     type Type = Type;
 }
 
-pub fn parse_function(def: FunctionDef, fimpl: FunctionImpl, types: &[Spanned<Type>]) -> Result<AllObject, Error> {
+pub fn parse_function(def: FunctionDef, fimpl: FunctionImpl, types: &[Rc<Spanned<Type>>]) -> Result<AllObject, Error> {
     let FunctionDef(ident, def) = def;
     let name = ident.map(|i| i.0);
     let func_type = parse_type_helper(*def, types)?;
