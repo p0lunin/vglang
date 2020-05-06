@@ -54,6 +54,4 @@ fn main() {
         }
         Ok(()) => {}
     }
-    println!("Your objects: {:#?}", ctx);
-    // println!("Your states: {:#?}", states);
 }

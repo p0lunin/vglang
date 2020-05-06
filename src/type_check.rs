@@ -39,15 +39,15 @@ pub fn type_check_objects<'a>(objects: &[AllObject], ctx: Option<&'a Context<'a>
         objects: vec![],
         parent: ctx,
     };
-    objects.iter().scan(ctx, |ctx, object| {
+    objects.iter().map(|object| {
         match object {
             AllObject::Function(f) => {
-                type_check_function(&f.object, ctx).err()?;
+                type_check_function(&f.object, &ctx)?;
                 // TODO: remove clone
                 ctx.objects.push(AllObject::Function(f.clone()));
-                Some(Ok(()))
+                Ok(())
             }
-            _ => Some(Ok(())),
+            _ => Ok(()),
         }
     }).collect()
 }
@@ -64,7 +64,7 @@ pub fn type_check_function(function: &FunctionObject, top: &Context) -> Result<(
     let res_type = type_check_expr(body.clone(), &ctx)?;
     match res_type.is_part_of(return_value) {
         true => Ok(()),
-        false => Err(Error::Custom(res_type.span, format!("Expected {} type, found {}", return_value, res_type), "-here".to_owned()))
+        false => Err(Error::Custom(name.span, format!("Expected {} type, found {}", return_value, res_type), "-here".to_owned()))
     }
 }
 
@@ -78,7 +78,7 @@ fn type_check_expr(expr: Expr, ctx: &Context) -> Result<Rc<Spanned<Type>>, Error
             Ok(Rc::new(Spanned::new((**left).clone().op_add((**right).clone())?, new_span)))
         }
         Expr::CallFunction(f) => {
-            Ok(f.object_type.args_types().last().unwrap().clone())
+            Ok(f.object_type.clone())
         }
     }
 }
