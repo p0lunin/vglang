@@ -39,7 +39,7 @@ fn main() {
             return;
         }
     };
-    let (types, objects) = match parse_tokens(ast) {
+    let ctx = match parse_tokens(ast) {
         Ok(t) => t,
         Err(errs) => {
             errs.into_iter()
@@ -47,18 +47,13 @@ fn main() {
             return;
         }
     };
-    println!("Your types");
-    types.iter().for_each(|ty| {
-        println!("{}: {}\n", ty.name(), ty);
-    });
-    let ctx = context_from_types(types);
-    match type_check_objects(&objects, Some(ctx)) {
+    match type_check_objects(&ctx.objects, Some(&ctx)) {
         Err(e) => {
             println!("{}", e.display(&data));
             return;
         }
         Ok(()) => {}
     }
-    println!("Your objects: {:#?}", objects);
+    println!("Your objects: {:#?}", ctx);
     // println!("Your states: {:#?}", states);
 }

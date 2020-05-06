@@ -5,12 +5,23 @@ use crate::types::{
     parse_type, parse_type_helper, Int, Type, TypeKind, TypeOperable, TypeType, VecType,
 };
 use std::rc::Rc;
+use crate::type_check::Context;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum AllObject {
-    Type(Object<Rc<Spanned<Type>>>),
-    Function(Object<FunctionObject>),
-    Var(Object<Var>),
+    Type(Rc<Object<Rc<Spanned<Type>>>>),
+    Function(Rc<Object<FunctionObject>>),
+    Var(Rc<Object<Var>>),
+}
+
+impl AllObject {
+    pub fn name(&self) -> &str {
+        match self {
+            AllObject::Type(t) => t.object.name(),
+            AllObject::Function(f) => &f.object.name,
+            AllObject::Var(v) => v.object.0.as_str(),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -34,7 +45,7 @@ impl Objectable for TypeType {
 #[derive(Debug, PartialEq, Clone)]
 pub struct FunctionObject {
     pub name: Spanned<String>,
-    pub args: Vec<Object<Var>>,
+    pub args: Vec<Rc<Object<Var>>>,
     pub return_value: Rc<Spanned<Type>>,
     pub body: Expr,
 }
@@ -46,10 +57,11 @@ impl Objectable for FunctionObject {
 pub enum Expr {
     Int(Object<IntObject>),
     Add(Box<Expr>, Box<Expr>),
+    CallFunction(Rc<Object<FunctionObject>>)
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct Var(Spanned<Ident>);
+pub struct Var(Spanned<String>);
 impl Objectable for Var {
     type Type = Type;
 }
@@ -65,12 +77,12 @@ impl Objectable for IntObject {
 pub fn parse_function(
     def: FunctionDef,
     fimpl: FunctionImpl,
-    types: &[Rc<Spanned<Type>>],
+    ctx: &Context,
 ) -> Result<AllObject, Error> {
     let FunctionDef(ident, def) = def;
     let name = ident.map(|i| i.0);
     let def_span = def.span;
-    let func_type = Rc::new(Spanned::new(parse_type_helper(*def, types)?, def_span));
+    let func_type = Rc::new(Spanned::new(parse_type_helper(*def, ctx)?, def_span));
     let count_args = func_type.count_args();
     let FunctionImpl(impl_name, args, body) = fimpl;
     let mut arg_types = func_type.args_types();
@@ -81,26 +93,26 @@ pub fn parse_function(
             format!("Expected {} arguments, found {}", count_args, args.len()),
             "-here".to_owned(),
         )),
-        true => Ok(AllObject::Function(Object {
+        true => Ok(AllObject::Function(Rc::new(Object {
             object: FunctionObject {
                 name,
                 args: args
                     .into_iter()
                     .zip(arg_types.into_iter())
-                    .map(|(v, t)| Object {
-                        object: Var(v),
+                    .map(|(v, t)| Rc::new(Object {
+                        object: Var(v.map(|i| i.0)),
                         object_type: t,
-                    })
+                    }))
                     .collect(),
                 return_value: return_type,
-                body: parse_expr(body.0)?,
+                body: parse_expr(body.0, ctx)?,
             },
             object_type: func_type,
-        })),
+        }))),
     }
 }
 
-pub fn parse_expr(token: Token) -> Result<Expr, Error> {
+pub fn parse_expr(token: Token, ctx: &Context) -> Result<Expr, Error> {
     match token.ast {
         Ast::Int(i) => Ok(Expr::Int(Object {
             object: IntObject {
@@ -115,9 +127,18 @@ pub fn parse_expr(token: Token) -> Result<Expr, Error> {
             )),
         })),
         Ast::Add(l, r) => Ok(Expr::Add(
-            Box::new(parse_expr(*l)?),
-            Box::new(parse_expr(*r)?),
+            Box::new(parse_expr(*l, ctx)?),
+            Box::new(parse_expr(*r, ctx)?),
         )),
+        Ast::Ident(i) => {
+            match ctx.objects.iter().find(|o| o.name() == &i.0) {
+                Some(o) => match o {
+                    AllObject::Function(f) => Ok(Expr::CallFunction(f.clone())),
+                    _ => unimplemented!(),
+                }
+                _ => Err(Error::Custom(token.span, format!("{} not found", i.0), "-here".to_owned())),
+            }
+        }
         _ => unimplemented!(),
     }
 }

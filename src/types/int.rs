@@ -19,12 +19,44 @@ pub enum Int {
     Slice(Spanned<Slice>),
 }
 
+impl Int {
+    pub fn is_part_of(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Int::Slice(l), r) => {
+                match r {
+                    Int::Value(v) => (**v - l.to) % l.step == 0,
+                    Int::Slice(r) => l.from >= r.from && l.to <= r.to && r.step % l.step == 0,
+                    _ => false
+                }
+            }
+            (l, Int::Slice(r)) => unimplemented!(),
+            _ => {
+                let (minx, maxx) = self.min_and_max();
+                let (miny, maxy) = other.min_and_max();
+                minx >= miny && maxx <= maxy
+            }
+        }
+    }
+    pub fn min_and_max(&self) -> (i128, i128) {
+        match self {
+            Int::Value(v) => (**v, **v),
+            Int::Bound(b) => match b {
+                OneRangeIntBound::High(h) => (i128::min_value(), **h),
+                OneRangeIntBound::Low(l) => (**l, i128::max_value()),
+                _ => (i128::min_value(), i128::max_value())
+            }
+            Int::KnownBound { low, high } => (**low, **high),
+            Int::Slice(s) => (s.from, s.to)
+        }
+    }
+}
+
 impl Display for Int {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         match self {
             Int::Value(i) => i.fmt(f),
             Int::Bound(i) => i.fmt(f),
-            Int::KnownBound { low, high } => f.write_str(&format!("val>={}&val<={}", low, high)),
+            Int::KnownBound { low, high } => f.write_str(&format!("(val>={} & val<={})", low, high)),
             Int::Slice(s) => f.write_str(&format!("val={{from: {}; step: {}; to: {};}}", s.from, s.step, s.to)),
         }
     }
@@ -259,7 +291,7 @@ impl Spanned<Int> {
                     },
                     span,
                 ),
-                Spanned::new(Int::Bound(OneRangeIntBound::High(value.clone() + 1)), span),
+                Spanned::new(Int::Bound(OneRangeIntBound::Low(value.clone() + 1)), span),
             ])),
             Int::Bound(OneRangeIntBound::Low(low)) if *low + 1 == *value => Ok(VecType(vec![
                 Spanned::new(Int::Value(low), span),

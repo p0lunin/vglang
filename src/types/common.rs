@@ -11,6 +11,8 @@ use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 use std::fmt::{Display, Formatter, Debug};
+use crate::type_check::Context;
+use crate::object::AllObject;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Type {
@@ -25,9 +27,11 @@ impl Type {
     pub fn is_part_of(&self, other: &Type) -> bool {
         match (self, other) {
             (Type::Function(l), Type::Function(r)) => {
-                unimplemented!()
+                l.kind.is_part_of(&r.kind)
             }
-            (Type::Int(l), Type::Int(r)) => unimplemented!(),
+            (Type::Int(l), Type::Int(r)) => l.kinds.iter().all(|l| {
+                r.kinds.iter().any(|r| l.is_part_of(r))
+            }),
             (Type::Type(_), Type::Type(_)) => true,
             (Type::AnotherType(l), r) => l.is_part_of(r),
             (l, Type::AnotherType(r)) => l.is_part_of(r),
@@ -217,7 +221,7 @@ impl<T: Display> Display for TypeKind<T> {
         match &self.name {
             Some(name) => f.write_str(&name),
             None => {
-                f.write_str(&self.kinds.iter().map(ToString::to_string).collect::<Vec<_>>().join(" & "))
+                f.write_str(&self.kinds.iter().map(ToString::to_string).collect::<Vec<_>>().join(" | "))
             }
         }
     }
@@ -343,26 +347,26 @@ pub enum MainType {
 
 pub fn parse_type(
     type_def: Spanned<parser::Type>,
-    types: &[Rc<Spanned<Type>>],
+    ctx: &Context,
 ) -> Result<Rc<Spanned<Type>>, Error> {
     let span = type_def.span;
     let parser::Type(name, def) = type_def.inner();
     let name_span = name.span;
     let name = Spanned::new(name.inner().0, name_span);
-    let mut t_type = parse_type_helper(def, types)?;
+    let mut t_type = parse_type_helper(def, ctx)?;
     t_type.set_name(name);
     Ok(Rc::new(Spanned::new(t_type, span)))
 }
 
-pub fn parse_type_helper(token: Token, types: &[Rc<Spanned<Type>>]) -> Result<Type, Error> {
+pub fn parse_type_helper(token: Token, ctx: &Context) -> Result<Type, Error> {
     let span = token.span;
     match token.ast {
-        Ast::And(l, r) => parse_type_helper(*l, types)
-            .and_then(|left| parse_type_helper(*r, types).and_then(|right| left.op_and(right))),
-        Ast::Or(l, r) => parse_type_helper(*l, types)
-            .and_then(|left| parse_type_helper(*r, types).and_then(|right| left.op_or(right))),
-        Ast::Add(l, r) => parse_type_helper(*l, types)
-            .and_then(|left| parse_type_helper(*r, types).and_then(|right| left.op_add(right))),
+        Ast::And(l, r) => parse_type_helper(*l, ctx)
+            .and_then(|left| parse_type_helper(*r, ctx).and_then(|right| left.op_and(right))),
+        Ast::Or(l, r) => parse_type_helper(*l, ctx)
+            .and_then(|left| parse_type_helper(*r, ctx).and_then(|right| left.op_or(right))),
+        Ast::Add(l, r) => parse_type_helper(*l, ctx)
+            .and_then(|left| parse_type_helper(*r, ctx).and_then(|right| left.op_add(right))),
         Ast::Int(i) => Ok(Type::Int(TypeKind {
             name: None,
             kinds: VecType::one(Spanned::new(
@@ -370,13 +374,13 @@ pub fn parse_type_helper(token: Token, types: &[Rc<Spanned<Type>>]) -> Result<Ty
                 token.span,
             )),
         })),
-        Ast::Parenthesis(t) => parse_type_helper(*t, types),
+        Ast::Parenthesis(t) => parse_type_helper(*t, ctx),
         Ast::Ident(i) => match i.0.as_str() {
             "Int" => Ok(Type::Int(TypeKind::empty())),
             "Type" => Ok(Type::Type(OneTypeKind::from_kind(Spanned::new(TypeType, token.span)))),
-            name => match types.iter().find(|t| t.name() == name) {
-                Some(t) => Ok(Type::AnotherType(t.clone())),
-                None => Err(Error::Custom(
+            name => match ctx.find(name) {
+                Some(AllObject::Type(t)) => Ok(Type::AnotherType(t.object.clone())),
+                _ => Err(Error::Custom(
                     token.span,
                     format!("Type {} not found", name),
                     "-this".to_owned(),
@@ -457,8 +461,8 @@ pub fn parse_type_helper(token: Token, types: &[Rc<Spanned<Type>>]) -> Result<Ty
                 )))),
             })
         }
-        Ast::Implication(l, r) => parse_type_helper(*l, types).and_then(|left| {
-            parse_type_helper(*r, types).and_then(|right| left.op_implication(right))
+        Ast::Implication(l, r) => parse_type_helper(*l, ctx).and_then(|left| {
+            parse_type_helper(*r, ctx).and_then(|right| left.op_implication(right))
         }),
         t => {
             dbg!(t);

@@ -11,6 +11,13 @@ pub struct Function {
     pub return_value: Rc<Spanned<Type>>,
 }
 
+impl Function {
+    pub fn is_part_of(&self, other: &Function) -> bool {
+        other.get_value.is_part_of(&self.get_value) &&
+            self.return_value.is_part_of(&other.return_value)
+    }
+}
+
 impl Display for Function {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         self.get_value.fmt(f)?;
