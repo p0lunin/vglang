@@ -80,5 +80,6 @@ fn type_check_expr(expr: Expr, ctx: &Context) -> Result<Rc<Spanned<Type>>, Error
         Expr::CallFunction(f) => {
             Ok(f.object_type.clone())
         }
+        Expr::Var(v) => Ok(v.object_type.clone())
     }
 }

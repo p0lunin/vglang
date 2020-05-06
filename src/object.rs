@@ -57,7 +57,8 @@ impl Objectable for FunctionObject {
 pub enum Expr {
     Int(Object<IntObject>),
     Add(Box<Expr>, Box<Expr>),
-    CallFunction(Rc<Object<FunctionObject>>)
+    CallFunction(Rc<Object<FunctionObject>>),
+    Var(Rc<Object<Var>>),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -93,22 +94,29 @@ pub fn parse_function(
             format!("Expected {} arguments, found {}", count_args, args.len()),
             "-here".to_owned(),
         )),
-        true => Ok(AllObject::Function(Rc::new(Object {
-            object: FunctionObject {
-                name,
-                args: args
-                    .into_iter()
-                    .zip(arg_types.into_iter())
-                    .map(|(v, t)| Rc::new(Object {
-                        object: Var(v.map(|i| i.0)),
-                        object_type: t,
-                    }))
-                    .collect(),
-                return_value: return_type,
-                body: parse_expr(body.0, ctx)?,
-            },
-            object_type: func_type,
-        }))),
+        true => {
+            let args = args
+                .into_iter()
+                .zip(arg_types.into_iter())
+                .map(|(v, t)| Rc::new(Object {
+                    object: Var(v.map(|i| i.0)),
+                    object_type: t,
+                }))
+                .collect::<Vec<_>>();
+            let ctx = Context {
+                objects: args.iter().map(|v| AllObject::Var(v.clone())).collect(),
+                parent: Some(ctx),
+            };
+            Ok(AllObject::Function(Rc::new(Object {
+                object: FunctionObject {
+                    name,
+                    args,
+                    return_value: return_type,
+                    body: parse_expr(body.0, &ctx)?,
+                },
+                object_type: func_type,
+            })))
+        },
     }
 }
 
@@ -131,9 +139,10 @@ pub fn parse_expr(token: Token, ctx: &Context) -> Result<Expr, Error> {
             Box::new(parse_expr(*r, ctx)?),
         )),
         Ast::Ident(i) => {
-            match ctx.objects.iter().find(|o| o.name() == &i.0) {
+            match ctx.find(&i.0) {
                 Some(o) => match o {
                     AllObject::Function(f) => Ok(Expr::CallFunction(f.clone())),
+                    AllObject::Var(v) => Ok(Expr::Var(v.clone())),
                     _ => unimplemented!(),
                 }
                 _ => Err(Error::Custom(token.span, format!("{} not found", i.0), "-here".to_owned())),
