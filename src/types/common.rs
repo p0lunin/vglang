@@ -32,7 +32,7 @@ impl Type {
             (Type::Int(l), Type::Int(r)) => l.kinds.iter().all(|l| {
                 r.kinds.iter().any(|r| l.is_part_of(r))
             }),
-            (Type::Type(_), Type::Type(_)) => true,
+            (_, Type::Type(_)) => true,
             (Type::AnotherType(l), r) => l.is_part_of(r),
             (l, Type::AnotherType(r)) => l.is_part_of(r),
             _ => false,
