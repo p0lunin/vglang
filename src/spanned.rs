@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use std::fmt::{Debug, Formatter, Display};
-use std::ops::{Add, Deref, DerefMut, Sub};
+use std::ops::{Add, Deref, DerefMut, Sub, Neg};
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub struct Span {
@@ -114,6 +114,17 @@ impl<T: Add<Output = T>> Add<T> for Spanned<T> {
     fn add(self, rhs: T) -> Self::Output {
         Self {
             val: self.val + rhs,
+            span: self.span,
+        }
+    }
+}
+
+impl<T: Neg> Neg for Spanned<T> {
+    type Output = Spanned<T::Output>;
+
+    fn neg(self) -> Self::Output {
+        Spanned {
+            val: -self.val,
             span: self.span,
         }
     }

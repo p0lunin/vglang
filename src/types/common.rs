@@ -20,7 +20,7 @@ pub enum Type {
     Int(TypeKind<Int>),
     Type(OneTypeKind<TypeType>),
     Unknown(OneTypeKind<Unknown>),
-    AnotherType(Rc<Spanned<Type>>),
+    AnotherType(Spanned<Rc<Spanned<Type>>>),
 }
 
 impl Type {
@@ -90,9 +90,23 @@ impl Type {
             Type::Unknown(t) => t.add(value).map(Type::Unknown),
             Type::Function(t) => t.add(value).map(Type::Function),
             Type::AnotherType(t) => {
-                let mut inner = (**t).clone();
+                let mut inner = (***t).clone();
                 inner.remove_name();
                 inner.op_add(value)
+            }
+        }
+    }
+
+    pub fn op_sub(self, value: Type) -> Result<Self, Error> {
+        match self {
+            Type::Int(t) => t.add(value.op_neg()?).map(Type::Int),
+            Type::Type(t) => t.add(value.op_neg()?).map(Type::Type),
+            Type::Unknown(t) => t.add(value.op_neg()?).map(Type::Unknown),
+            Type::Function(t) => t.add(value.op_neg()?).map(Type::Function),
+            Type::AnotherType(t) => {
+                let mut inner = (***t).clone();
+                inner.remove_name();
+                inner.op_add(value.op_neg()?)
             }
         }
     }
@@ -104,7 +118,7 @@ impl Type {
             Type::Unknown(t) => t.and(value).map(Type::Unknown),
             Type::Function(t) => t.and(value).map(Type::Function),
             Type::AnotherType(t) => {
-                let mut inner = (**t).clone();
+                let mut inner = (***t).clone();
                 inner.remove_name();
                 inner.op_and(value)
             }
@@ -118,9 +132,23 @@ impl Type {
             Type::Unknown(t) => t.or(value).map(Type::Unknown),
             Type::Function(t) => t.or(value).map(Type::Function),
             Type::AnotherType(t) => {
-                let mut inner = (**t).clone();
+                let mut inner = (***t).clone();
                 inner.remove_name();
                 inner.op_or(value)
+            }
+        }
+    }
+
+    pub fn op_neg(self) -> Result<Self, Error> {
+        match self {
+            Type::Int(t) => t.neg().map(Type::Int),
+            Type::Type(t) => t.neg().map(Type::Type),
+            Type::Unknown(t) => t.neg().map(Type::Unknown),
+            Type::Function(t) => t.neg().map(Type::Function),
+            Type::AnotherType(t) => {
+                let mut inner = (***t).clone();
+                inner.remove_name();
+                inner.op_neg()
             }
         }
     }
@@ -147,7 +175,6 @@ impl Spanned<Type> {
                 vec.extend(f.return_value.args_types());
                 vec
             }
-            Type::AnotherType(t) => vec![t.clone()],
             _ => vec![self.clone()],
         }
     }
@@ -155,6 +182,7 @@ impl Spanned<Type> {
 
 pub trait TypeOperable<T>: Sized {
     fn add(self, right: Type) -> Result<Self, Error>;
+    fn neg(self) -> Result<Self, Error>;
     fn and(self, right: Type) -> Result<Self, Error>;
     fn or(self, right: Type) -> Result<Self, Error>;
 }
@@ -291,6 +319,14 @@ impl TypeOperable<TypeType> for OneTypeKind<TypeType> {
         ))
     }
 
+    fn neg(self) -> Result<Self, Error> {
+        Err(Error::Custom(
+            self.kind.span,
+            "- is not allowed for `Type` value".to_owned(),
+            "-here".to_owned(),
+        ))
+    }
+
     fn and(self, right: Type) -> Result<Self, Error> {
         Err(Error::Custom(
             right.span(),
@@ -316,6 +352,14 @@ impl TypeOperable<Unknown> for OneTypeKind<Unknown> {
         Err(Error::Custom(
             right.span(),
             "+ is not allowed for `Unknown` value".to_owned(),
+            "-here".to_owned(),
+        ))
+    }
+
+    fn neg(self) -> Result<Self, Error> {
+        Err(Error::Custom(
+            self.kind.span,
+            "- is not allowed for `Unknown` value".to_owned(),
             "-here".to_owned(),
         ))
     }
@@ -379,7 +423,7 @@ pub fn parse_type_helper(token: Token, ctx: &Context) -> Result<Type, Error> {
             "Int" => Ok(Type::Int(TypeKind::empty())),
             "Type" => Ok(Type::Type(OneTypeKind::from_kind(Spanned::new(TypeType, token.span)))),
             name => match ctx.find(name) {
-                Some(AllObject::Type(t)) => Ok(Type::AnotherType(t.object.clone())),
+                Some(AllObject::Type(t)) => Ok(Type::AnotherType(Spanned::new(t.object.clone(), token.span))),
                 _ => Err(Error::Custom(
                     token.span,
                     format!("Type {} not found", name),
@@ -456,7 +500,7 @@ pub fn parse_type_helper(token: Token, ctx: &Context) -> Result<Type, Error> {
                     span,
                 )))),
                 _ => Type::Int(TypeKind::from_kinds(VecType::one(Spanned::new(
-                    Int::Slice(Spanned::new(Slice { from, step, to }, span)),
+                    Int::Slice(Slice { from, step, to }),
                     span,
                 )))),
             })

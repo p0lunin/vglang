@@ -57,6 +57,7 @@ impl Objectable for FunctionObject {
 pub enum Expr {
     Int(Object<IntObject>),
     Add(Box<Expr>, Box<Expr>),
+    Sub(Box<Expr>, Box<Expr>),
     CallFunction(Rc<Object<FunctionObject>>),
     Var(Rc<Object<Var>>),
 }
@@ -69,7 +70,7 @@ impl Objectable for Var {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct IntObject {
-    data: Spanned<i128>,
+    pub data: Spanned<i128>,
 }
 impl Objectable for IntObject {
     type Type = Type;
@@ -135,6 +136,10 @@ pub fn parse_expr(token: Token, ctx: &Context) -> Result<Expr, Error> {
             )),
         })),
         Ast::Add(l, r) => Ok(Expr::Add(
+            Box::new(parse_expr(*l, ctx)?),
+            Box::new(parse_expr(*r, ctx)?),
+        )),
+        Ast::Sub(l, r) => Ok(Expr::Sub(
             Box::new(parse_expr(*l, ctx)?),
             Box::new(parse_expr(*r, ctx)?),
         )),

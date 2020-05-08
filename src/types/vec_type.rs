@@ -80,7 +80,7 @@ impl VecType<Spanned<Int>> {
             .collect::<Result<Vec<_>, _>>()
             .map(|r| r.into_iter().flatten().collect::<Self>())
     }
-    pub fn try_add_slice_bound(self, value: Spanned<Slice>) -> Result<Self, Error> {
+    pub fn try_add_slice_bound(self, value: Slice) -> Result<Self, Error> {
         self.0
             .into_iter()
             .map(|i| i.try_add_slice_bound(value.clone()))

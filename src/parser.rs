@@ -47,6 +47,7 @@ pub enum Ast {
     Val,
     Slice(Slice),
     Implication(Box<Token>, Box<Token>),
+    Named(Spanned<Ident>, Box<Token>),
 }
 
 #[derive(Debug, PartialEq)]
@@ -168,7 +169,8 @@ peg::parser! { grammar lang() for str {
         = num() /
         s:position!() "val" e:position!() { Token::new(Span::new(s, e), Ast::Val) } /
         id:ident() { Token::new(id.span, Ast::Ident(id.inner())) } /
-        s:position!() slice:slice() e:position!() { Token::new(Span::new(s, e), Ast::Slice(slice)) }
+        s:position!() slice:slice() e:position!() { Token::new(Span::new(s, e), Ast::Slice(slice)) } /
+        s:position!() "{" _ id:ident() _ ":" _ ty:logic(i) "}" e:position!() { Token::new(Span::new(s, e), Ast::Named(id, Box::new(ty))) }
 
     rule slice() -> Slice
         = "[" _ first:spanned_int() _ "," _ second:spanned_int() _ ".." _ last:spanned_int() _ "]" {

@@ -36,6 +36,14 @@ impl TypeOperable<Function> for OneTypeKind<Function> {
         ))
     }
 
+    fn neg(self) -> Result<Self, Error> {
+        Err(Error::Custom(
+            self.kind.span,
+            "- is not allowed for `Function` value".to_owned(),
+            "-here".to_owned(),
+        ))
+    }
+
     fn and(self, right: Type) -> Result<Self, Error> {
         Err(Error::Custom(
             right.span(),

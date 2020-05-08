@@ -64,7 +64,7 @@ pub fn type_check_function(function: &FunctionObject, top: &Context) -> Result<(
     let res_type = type_check_expr(body.clone(), &ctx)?;
     match res_type.is_part_of(return_value) {
         true => Ok(()),
-        false => Err(Error::Custom(name.span, format!("Expected {} type, found {}", return_value, res_type), "-here".to_owned()))
+        false => Err(Error::Custom(res_type.span, format!("Expected {} type, found {}", return_value, res_type), "-here".to_owned()))
     }
 }
 
@@ -77,9 +77,15 @@ fn type_check_expr(expr: Expr, ctx: &Context) -> Result<Rc<Spanned<Type>>, Error
             let new_span = left.span.extend(&right.span);
             Ok(Rc::new(Spanned::new((**left).clone().op_add((**right).clone())?, new_span)))
         }
+        Expr::Sub(l, r) => {
+            let left = type_check_expr(*l, ctx)?;
+            let right = type_check_expr(*r, ctx)?;
+            let new_span = left.span.extend(&right.span);
+            Ok(Rc::new(Spanned::new((**left).clone().op_sub((**right).clone())?, new_span)))
+        }
         Expr::CallFunction(f) => {
             Ok(f.object_type.clone())
         }
-        Expr::Var(v) => Ok(v.object_type.clone())
+        Expr::Var(v) => Ok(v.object_type.clone()),
     }
 }

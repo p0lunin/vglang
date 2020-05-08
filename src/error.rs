@@ -4,6 +4,7 @@ use crate::spanned::Span;
 #[derive(Debug, PartialEq)]
 pub enum Error {
     Span(Span),
+    NotSpan,
     NotDefined(Span, &'static str),
     Convert(Span, &'static str),
     DifferentTypes(Span, Span),
@@ -22,7 +23,12 @@ impl Error {
             Error::NotHaveType(s) => *s,
             Error::VoidType(s) => *s,
             Error::Custom(s, _, _) => *s,
+            Error::NotSpan => unreachable!(),
         }
+    }
+
+    pub fn map_span(self, span: Span) -> Self {
+        Error::Span(span)
     }
 }
 
@@ -90,6 +96,7 @@ impl Error {
             Error::Custom(span, desc, ann) => {
                 ErrorMsgBuilder::default_one_span(*span, source, "Error", &desc, &ann).build()
             }
+            Error::NotSpan => unreachable!()
         }
     }
 }
