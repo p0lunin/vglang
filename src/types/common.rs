@@ -1,18 +1,19 @@
-use crate::error::Error;
+use crate::error::{Error, SpannedError};
+use crate::object::AllObject;
 use crate::parser;
 use crate::parser::{Ast, Token};
+use crate::spanned::AddSpan;
 use crate::spanned::{Span, Spanned};
+use crate::type_check::Context;
 use crate::types::function::Function;
 use crate::types::int::{Int, OneRangeIntBound, Slice};
 use crate::types::vec_type::VecType;
 use std::cmp::{max, min};
 use std::convert::TryFrom;
+use std::fmt::{Debug, Display, Formatter};
 use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
-use std::fmt::{Display, Formatter, Debug};
-use crate::type_check::Context;
-use crate::object::AllObject;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Type {
@@ -26,12 +27,11 @@ pub enum Type {
 impl Type {
     pub fn is_part_of(&self, other: &Type) -> bool {
         match (self, other) {
-            (Type::Function(l), Type::Function(r)) => {
-                l.kind.is_part_of(&r.kind)
-            }
-            (Type::Int(l), Type::Int(r)) => l.kinds.iter().all(|l| {
-                r.kinds.iter().any(|r| l.is_part_of(r))
-            }),
+            (Type::Function(l), Type::Function(r)) => l.kind.is_part_of(&r.kind),
+            (Type::Int(l), Type::Int(r)) => l
+                .kinds
+                .iter()
+                .all(|l| r.kinds.iter().any(|r| l.is_part_of(r))),
             (_, Type::Type(_)) => true,
             (Type::AnotherType(l), r) => l.is_part_of(r),
             (l, Type::AnotherType(r)) => l.is_part_of(r),
@@ -47,7 +47,7 @@ impl Display for Type {
             Type::Int(t) => Display::fmt(t, f),
             Type::Type(_) => f.write_str("Type"),
             Type::Unknown(_) => f.write_str("Unknown"),
-            Type::AnotherType(t) => f.write_str(t.name())
+            Type::AnotherType(t) => f.write_str(t.name()),
         }
     }
 }
@@ -83,7 +83,7 @@ impl Type {
         }
     }
 
-    pub fn op_add(self, value: Type) -> Result<Self, Error> {
+    pub fn op_add(self, value: Type) -> Result<Self, String> {
         match self {
             Type::Int(t) => t.add(value).map(Type::Int),
             Type::Type(t) => t.add(value).map(Type::Type),
@@ -97,7 +97,7 @@ impl Type {
         }
     }
 
-    pub fn op_sub(self, value: Type) -> Result<Self, Error> {
+    pub fn op_sub(self, value: Type) -> Result<Self, String> {
         match self {
             Type::Int(t) => t.add(value.op_neg()?).map(Type::Int),
             Type::Type(t) => t.add(value.op_neg()?).map(Type::Type),
@@ -111,7 +111,7 @@ impl Type {
         }
     }
 
-    pub fn op_and(self, value: Type) -> Result<Self, Error> {
+    pub fn op_and(self, value: Type) -> Result<Self, String> {
         match self {
             Type::Int(t) => t.and(value).map(Type::Int),
             Type::Type(t) => t.and(value).map(Type::Type),
@@ -125,7 +125,7 @@ impl Type {
         }
     }
 
-    pub fn op_or(self, value: Type) -> Result<Self, Error> {
+    pub fn op_or(self, value: Type) -> Result<Self, String> {
         match self {
             Type::Int(t) => t.or(value).map(Type::Int),
             Type::Type(t) => t.or(value).map(Type::Type),
@@ -139,7 +139,7 @@ impl Type {
         }
     }
 
-    pub fn op_neg(self) -> Result<Self, Error> {
+    pub fn op_neg(self) -> Result<Self, String> {
         match self {
             Type::Int(t) => t.neg().map(Type::Int),
             Type::Type(t) => t.neg().map(Type::Type),
@@ -181,10 +181,10 @@ impl Spanned<Type> {
 }
 
 pub trait TypeOperable<T>: Sized {
-    fn add(self, right: Type) -> Result<Self, Error>;
-    fn neg(self) -> Result<Self, Error>;
-    fn and(self, right: Type) -> Result<Self, Error>;
-    fn or(self, right: Type) -> Result<Self, Error>;
+    fn add(self, right: Type) -> Result<Self, String>;
+    fn neg(self) -> Result<Self, String>;
+    fn and(self, right: Type) -> Result<Self, String>;
+    fn or(self, right: Type) -> Result<Self, String>;
 }
 
 impl Type {
@@ -241,17 +241,24 @@ impl Type {
 #[derive(Debug, PartialEq, Clone)]
 pub struct TypeKind<T> {
     pub name: Option<Spanned<String>>,
-    pub kinds: VecType<Spanned<T>>,
+    pub kinds: Spanned<VecType<T>>,
 }
 
 impl<T: Display> Display for TypeKind<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "Type:\n")?;
         match &self.name {
-            Some(name) => f.write_str(&name),
-            None => {
-                f.write_str(&self.kinds.iter().map(ToString::to_string).collect::<Vec<_>>().join(" | "))
-            }
-        }
+            Some(name) => f.write_str(&format!("Name: {}\n", name))?,
+            None => {}
+        };
+        f.write_str(
+            &self
+                .kinds
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(" | "),
+        )
     }
 }
 
@@ -281,29 +288,28 @@ impl<T> OneTypeKind<T> {
 }
 
 impl<T> TypeKind<T> {
-    pub fn empty() -> Self {
+    pub fn empty(span: Span) -> Self {
         Self {
             name: None,
-            kinds: VecType(vec![]),
+            kinds: Spanned::new(VecType(vec![]), span),
         }
     }
-    pub fn from_kinds(kinds: VecType<Spanned<T>>) -> Self {
+    pub fn from_kinds(kinds: Spanned<VecType<T>>) -> Self {
         Self { name: None, kinds }
     }
-    pub fn fmap<F: FnMut(Spanned<T>) -> Result<Spanned<T>, E>, E>(self, f: F) -> Result<Self, E> {
+    pub fn fmap<F: FnMut(T) -> Result<T, E>, E>(self, f: F) -> Result<Self, E> {
         let TypeKind { name, kinds } = self;
-        kinds
-            .into_iter()
+        let Spanned { val, span } = kinds;
+        val.into_iter()
             .map(f)
-            .collect::<Result<VecType<Spanned<T>>, E>>()
-            .map(|kinds| Self { kinds, name })
+            .collect::<Result<VecType<T>, E>>()
+            .map(|kinds| Self {
+                kinds: kinds.add_span(span),
+                name,
+            })
     }
     pub fn span(&self) -> Span {
-        self.kinds
-            .first()
-            .unwrap()
-            .span
-            .extend(&self.kinds.last().unwrap().span)
+        self.kinds.span
     }
 }
 
@@ -311,36 +317,20 @@ impl<T> TypeKind<T> {
 pub struct TypeType;
 
 impl TypeOperable<TypeType> for OneTypeKind<TypeType> {
-    fn add(self, right: Type) -> Result<Self, Error> {
-        Err(Error::Custom(
-            right.span(),
-            "+ is not allowed for `Type` value".to_owned(),
-            "-here".to_owned(),
-        ))
+    fn add(self, right: Type) -> Result<Self, String> {
+        Err("+ is not allowed for `Type` value".to_owned())
     }
 
-    fn neg(self) -> Result<Self, Error> {
-        Err(Error::Custom(
-            self.kind.span,
-            "- is not allowed for `Type` value".to_owned(),
-            "-here".to_owned(),
-        ))
+    fn neg(self) -> Result<Self, String> {
+        Err("- is not allowed for `Type` value".to_owned())
     }
 
-    fn and(self, right: Type) -> Result<Self, Error> {
-        Err(Error::Custom(
-            right.span(),
-            "& is not allowed for `Type` value".to_owned(),
-            "-here".to_owned(),
-        ))
+    fn and(self, right: Type) -> Result<Self, String> {
+        Err("& is not allowed for `Type` value".to_owned())
     }
 
-    fn or(self, right: Type) -> Result<Self, Error> {
-        Err(Error::Custom(
-            right.span(),
-            "| is not allowed for `Type` value".to_owned(),
-            "-here".to_owned(),
-        ))
+    fn or(self, right: Type) -> Result<Self, String> {
+        Err("| is not allowed for `Type` value".to_owned())
     }
 }
 
@@ -348,36 +338,20 @@ impl TypeOperable<TypeType> for OneTypeKind<TypeType> {
 pub struct Unknown;
 
 impl TypeOperable<Unknown> for OneTypeKind<Unknown> {
-    fn add(self, right: Type) -> Result<Self, Error> {
-        Err(Error::Custom(
-            right.span(),
-            "+ is not allowed for `Unknown` value".to_owned(),
-            "-here".to_owned(),
-        ))
+    fn add(self, right: Type) -> Result<Self, String> {
+        Err("+ is not allowed for `Unknown` value".to_owned())
     }
 
-    fn neg(self) -> Result<Self, Error> {
-        Err(Error::Custom(
-            self.kind.span,
-            "- is not allowed for `Unknown` value".to_owned(),
-            "-here".to_owned(),
-        ))
+    fn neg(self) -> Result<Self, String> {
+        Err("- is not allowed for `Unknown` value".to_owned())
     }
 
-    fn and(self, right: Type) -> Result<Self, Error> {
-        Err(Error::Custom(
-            right.span(),
-            "& is not allowed for `Unknown` value".to_owned(),
-            "-here".to_owned(),
-        ))
+    fn and(self, right: Type) -> Result<Self, String> {
+        Err("& is not allowed for `Unknown` value".to_owned())
     }
 
-    fn or(self, right: Type) -> Result<Self, Error> {
-        Err(Error::Custom(
-            right.span(),
-            "| is not allowed for `Unknown` value".to_owned(),
-            "-here".to_owned(),
-        ))
+    fn or(self, right: Type) -> Result<Self, String> {
+        Err("| is not allowed for `Unknown` value".to_owned())
     }
 }
 
@@ -405,25 +379,34 @@ pub fn parse_type(
 pub fn parse_type_helper(token: Token, ctx: &Context) -> Result<Type, Error> {
     let span = token.span;
     match token.ast {
-        Ast::And(l, r) => parse_type_helper(*l, ctx)
-            .and_then(|left| parse_type_helper(*r, ctx).and_then(|right| left.op_and(right))),
-        Ast::Or(l, r) => parse_type_helper(*l, ctx)
-            .and_then(|left| parse_type_helper(*r, ctx).and_then(|right| left.op_or(right))),
-        Ast::Add(l, r) => parse_type_helper(*l, ctx)
-            .and_then(|left| parse_type_helper(*r, ctx).and_then(|right| left.op_add(right))),
+        Ast::And(l, r) => parse_type_helper(*l, ctx).and_then(|left| {
+            parse_type_helper(*r, ctx).and_then(|right| left.op_and(right).spanned_err(span))
+        }),
+        Ast::Or(l, r) => parse_type_helper(*l, ctx).and_then(|left| {
+            parse_type_helper(*r, ctx).and_then(|right| left.op_or(right).spanned_err(span))
+        }),
+        Ast::Add(l, r) => parse_type_helper(*l, ctx).and_then(|left| {
+            parse_type_helper(*r, ctx).and_then(|right| left.op_add(right).spanned_err(span))
+        }),
+        Ast::Sub(l, r) => parse_type_helper(*l, ctx).and_then(|left| {
+            parse_type_helper(*r, ctx).and_then(|right| left.op_sub(right).spanned_err(span))
+        }),
+        Ast::Neg(t) => parse_type_helper(*t, ctx).and_then(|left| left.op_neg().spanned_err(span)),
         Ast::Int(i) => Ok(Type::Int(TypeKind {
             name: None,
-            kinds: VecType::one(Spanned::new(
-                Int::Value(Spanned::new(i, token.span)),
-                token.span,
-            )),
+            kinds: Spanned::new(VecType::one(Int::Value(i)), token.span),
         })),
         Ast::Parenthesis(t) => parse_type_helper(*t, ctx),
         Ast::Ident(i) => match i.0.as_str() {
-            "Int" => Ok(Type::Int(TypeKind::empty())),
-            "Type" => Ok(Type::Type(OneTypeKind::from_kind(Spanned::new(TypeType, token.span)))),
+            "Int" => Ok(Type::Int(TypeKind::empty(span))),
+            "Type" => Ok(Type::Type(OneTypeKind::from_kind(Spanned::new(
+                TypeType, token.span,
+            )))),
             name => match ctx.find(name) {
-                Some(AllObject::Type(t)) => Ok(Type::AnotherType(Spanned::new(t.object.clone(), token.span))),
+                Some(AllObject::Type(t)) => Ok(Type::AnotherType(Spanned::new(
+                    t.object.clone(),
+                    token.span,
+                ))),
                 _ => Err(Error::Custom(
                     token.span,
                     format!("Type {} not found", name),
@@ -466,17 +449,17 @@ pub fn parse_type_helper(token: Token, ctx: &Context) -> Result<Type, Error> {
         Ast::Eq(l, r) => match (*l, *r) {
             (Token { ast: Ast::Val, .. }, t) => Ok(Type::Int(TypeKind {
                 name: None,
-                kinds: VecType::one(Spanned::new(
-                    Int::Value(get_arithmetic_val(&t)?),
+                kinds: Spanned::new(
+                    VecType::one(Int::Value(get_arithmetic_val(&t)?)),
                     token.span,
-                )),
+                ),
             })),
             (t, Token { ast: Ast::Val, .. }) => Ok(Type::Int(TypeKind {
                 name: None,
-                kinds: VecType::one(Spanned::new(
-                    Int::Value(get_arithmetic_val(&t)?),
+                kinds: Spanned::new(
+                    VecType::one(Int::Value(get_arithmetic_val(&t)?)),
                     token.span,
-                )),
+                ),
             })),
             _ => Err(Error::Span(token.span)),
         },
@@ -492,17 +475,17 @@ pub fn parse_type_helper(token: Token, ctx: &Context) -> Result<Type, Error> {
             let step = *s.second - *s.first;
             let to = *s.last;
             Ok(match step {
-                1 => Type::Int(TypeKind::from_kinds(VecType::one(Spanned::new(
-                    Int::KnownBound {
-                        low: s.first,
-                        high: s.last,
-                    },
+                1 => Type::Int(TypeKind::from_kinds(Spanned::new(
+                    VecType::one(Int::KnownBound {
+                        low: from,
+                        high: to,
+                    }),
                     span,
-                )))),
-                _ => Type::Int(TypeKind::from_kinds(VecType::one(Spanned::new(
-                    Int::Slice(Slice { from, step, to }),
+                ))),
+                _ => Type::Int(TypeKind::from_kinds(Spanned::new(
+                    VecType::one(Int::Slice(Slice { from, step, to })),
                     span,
-                )))),
+                ))),
             })
         }
         Ast::Implication(l, r) => parse_type_helper(*l, ctx).and_then(|left| {
@@ -516,17 +499,14 @@ pub fn parse_type_helper(token: Token, ctx: &Context) -> Result<Type, Error> {
 }
 
 fn one_bound(bound: OneRangeIntBound, span: Span) -> Type {
-    Type::Int(TypeKind::from_kinds(VecType::one(Spanned::new(
-        Int::Bound(bound),
+    Type::Int(TypeKind::from_kinds(Spanned::new(
+        VecType::one(Int::Bound(bound)),
         span,
-    ))))
+    )))
 }
 
-fn get_arithmetic_val(token: &Token) -> Result<Spanned<i128>, Error> {
-    Ok(Spanned::new(
-        token.eval_arithmetic().map_err(|s| Error::Span(s))?,
-        token.span,
-    ))
+fn get_arithmetic_val(token: &Token) -> Result<i128, Error> {
+    token.eval_arithmetic().map_err(|s| Error::Span(s))
 }
 
 impl Token {

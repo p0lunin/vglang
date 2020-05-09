@@ -1,10 +1,19 @@
 use crate::error_builder::ErrorMsgBuilder;
 use crate::spanned::Span;
 
+pub trait SpannedError<T> {
+    fn spanned_err(self, span: Span) -> Result<T, Error>;
+}
+
+impl<T> SpannedError<T> for Result<T, String> {
+    fn spanned_err(self, span: Span) -> Result<T, Error> {
+        self.map_err(|e| Error::Custom(span, e, "-here".to_owned()))
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub enum Error {
     Span(Span),
-    NotSpan,
     NotDefined(Span, &'static str),
     Convert(Span, &'static str),
     DifferentTypes(Span, Span),
@@ -23,7 +32,6 @@ impl Error {
             Error::NotHaveType(s) => *s,
             Error::VoidType(s) => *s,
             Error::Custom(s, _, _) => *s,
-            Error::NotSpan => unreachable!(),
         }
     }
 
@@ -96,7 +104,6 @@ impl Error {
             Error::Custom(span, desc, ann) => {
                 ErrorMsgBuilder::default_one_span(*span, source, "Error", &desc, &ann).build()
             }
-            Error::NotSpan => unreachable!()
         }
     }
 }

@@ -1,5 +1,7 @@
 use clap::{App, Arg};
-use fsmcreator::{parse, parse_tokens, peg_error_to_showed, context_from_types, type_check_objects};
+use fsmcreator::{
+    context_from_types, parse, parse_tokens, peg_error_to_showed, type_check_objects,
+};
 use std::fs::File;
 use std::io::Read;
 
@@ -54,4 +56,8 @@ fn main() {
         }
         Ok(()) => {}
     }
+    println!("Types: ");
+    ctx.objects.into_iter().for_each(|o| {
+        println!("{}\n", o);
+    })
 }

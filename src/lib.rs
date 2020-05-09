@@ -8,21 +8,19 @@ mod types;
 
 pub use error::peg_error_to_showed;
 pub use parser::parse;
-pub use type_check::{type_check_objects, context_from_types};
+pub use type_check::{context_from_types, type_check_objects};
 
 use crate::error::Error;
 use crate::object::{parse_function, AllObject, Object};
 use crate::parser::TopLevelToken;
 use crate::spanned::Spanned;
+use crate::type_check::Context;
 use crate::types::{Type, TypeType};
 use itertools::Itertools;
 use std::collections::{LinkedList, VecDeque};
 use std::rc::Rc;
-use crate::type_check::Context;
 
-pub fn parse_tokens<'a>(
-    tokens: Vec<Spanned<TopLevelToken>>,
-) -> Result<Context<'a>, Vec<Error>> {
+pub fn parse_tokens<'a>(tokens: Vec<Spanned<TopLevelToken>>) -> Result<Context<'a>, Vec<Error>> {
     let mut errors = vec![];
     let mut ctx = Context {
         objects: vec![],
@@ -40,7 +38,7 @@ pub fn parse_tokens<'a>(
                         object: t,
                         object_type: Rc::new(Spanned::new(TypeType, span)),
                     })))
-                },
+                }
                 Err(err) => errors.push(err),
             },
             TopLevelToken::NewLine | TopLevelToken::Comment => {}

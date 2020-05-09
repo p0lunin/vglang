@@ -1,34 +1,30 @@
-use crate::error::Error;
+use crate::error::{Error, SpannedError};
+use crate::spanned::AddSpan;
 use crate::spanned::Spanned;
 use crate::types::common::Type;
 use crate::types::vec_type::VecType;
 use crate::types::{TypeKind, TypeOperable};
 use itertools::Itertools;
 use std::cmp::{max, min};
-use std::ops::Add;
 use std::fmt::{Display, Formatter};
+use std::ops::Add;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Int {
-    Value(Spanned<i128>),
+    Value(i128),
     Bound(OneRangeIntBound),
-    KnownBound {
-        low: Spanned<i128>,
-        high: Spanned<i128>,
-    },
+    KnownBound { low: i128, high: i128 },
     Slice(Slice),
 }
 
 impl Int {
     pub fn is_part_of(&self, other: &Self) -> bool {
         match (self, other) {
-            (Int::Slice(l), r) => {
-                match r {
-                    Int::Value(v) => (**v - l.to) % l.step == 0,
-                    Int::Slice(r) => l.from >= r.from && l.to <= r.to && r.step % l.step == 0,
-                    _ => false
-                }
-            }
+            (Int::Slice(l), r) => match r {
+                Int::Value(v) => (*v - l.to) % l.step == 0,
+                Int::Slice(r) => l.from >= r.from && l.to <= r.to && r.step % l.step == 0,
+                _ => false,
+            },
             (l, Int::Slice(r)) => unimplemented!(),
             _ => {
                 let (minx, maxx) = self.min_and_max();
@@ -39,14 +35,14 @@ impl Int {
     }
     pub fn min_and_max(&self) -> (i128, i128) {
         match self {
-            Int::Value(v) => (**v, **v),
+            Int::Value(v) => (*v, *v),
             Int::Bound(b) => match b {
-                OneRangeIntBound::High(h) => (i128::min_value(), **h),
-                OneRangeIntBound::Low(l) => (**l, i128::max_value()),
-                _ => (i128::min_value(), i128::max_value())
-            }
-            Int::KnownBound { low, high } => (**low, **high),
-            Int::Slice(s) => (s.from, s.to)
+                OneRangeIntBound::High(h) => (i128::min_value(), *h),
+                OneRangeIntBound::Low(l) => (*l, i128::max_value()),
+                _ => (i128::min_value(), i128::max_value()),
+            },
+            Int::KnownBound { low, high } => (*low, *high),
+            Int::Slice(s) => (s.from, s.to),
         }
     }
 }
@@ -56,218 +52,207 @@ impl Display for Int {
         match self {
             Int::Value(i) => i.fmt(f),
             Int::Bound(i) => i.fmt(f),
-            Int::KnownBound { low, high } => f.write_str(&format!("(val>={} & val<={})", low, high)),
-            Int::Slice(s) => f.write_str(&format!("val={{from: {}; step: {}; to: {};}}", s.from, s.step, s.to)),
+            Int::KnownBound { low, high } => {
+                f.write_str(&format!("(val>={} & val<={})", low, high))
+            }
+            Int::Slice(s) => f.write_str(&format!(
+                "val={{from: {}; step: {}; to: {};}}",
+                s.from, s.step, s.to
+            )),
         }
     }
 }
 
 impl TypeOperable<Int> for TypeKind<Int> {
-    fn add(self, right: Type) -> Result<Self, Error> {
+    fn add(self, right: Type) -> Result<Self, String> {
         let TypeKind { name, kinds } = self;
-        let kinds = kinds
+        let Spanned { val, span } = kinds;
+        let kinds = val
             .inner()
             .into_iter()
             .map(|t| t.add(right.clone()))
-            .collect::<Result<Vec<_>, Error>>()?
+            .collect::<Result<Vec<_>, _>>()?
             .into_iter()
             .flatten()
-            .collect();
+            .collect::<VecType<_>>()
+            .add_span(span);
         Ok(TypeKind { name, kinds })
     }
 
-    fn neg(self) -> Result<Self, Error> {
+    fn neg(self) -> Result<Self, String> {
         let TypeKind { name, kinds } = self;
-        let kinds = kinds
+        let Spanned { val, span } = kinds;
+        let kinds = val
             .inner()
             .into_iter()
             .map(|t| t.neg())
-            .collect::<Result<VecType<_>, _>>()?;
+            .collect::<Result<VecType<_>, _>>()?
+            .add_span(span);
         Ok(TypeKind { name, kinds })
     }
 
-    fn and(self, right: Type) -> Result<Self, Error> {
+    fn and(self, right: Type) -> Result<Self, String> {
         let ty = match right {
             Type::Int(i) => i,
-            _ => return Err(Error::Span(self.span().extend(&right.span()))),
+            _ => {
+                return Err(format!(
+                    "Operator & not implement for types {} and {}",
+                    self, right
+                ))
+            }
         };
         let TypeKind { name, kinds } = self;
-        let kinds = kinds
-            .inner()
+        let Spanned { val, span } = kinds;
+        let kinds = val
             .into_iter()
             .cartesian_product(ty.kinds.inner().into_iter())
             .map(|(t, i)| t.extend_with_other(i.clone()))
-            .collect::<Result<Vec<_>, Error>>()?
+            .collect::<Result<Vec<_>, String>>()?
             .into_iter()
             .flatten()
-            .collect();
+            .collect::<VecType<_>>()
+            .add_span(span);
         Ok(TypeKind { name, kinds })
     }
 
-    fn or(self, right: Type) -> Result<Self, Error> {
+    fn or(self, right: Type) -> Result<Self, String> {
         let TypeKind { name, kinds } = self;
+        let new_span = kinds.span.extend(&right.span());
         match right {
             Type::Int(i) => Ok(TypeKind {
                 name,
-                kinds: kinds.with(i.kinds),
+                kinds: kinds.inner().with(i.kinds.inner()).add_span(new_span),
             }),
-            _ => Err(Error::Span(right.span())),
+            _ => Err(format!(
+                "Operator | not implement for types {} and {}",
+                TypeKind { name, kinds },
+                right
+            )),
         }
     }
 }
 
-impl Spanned<Int> {
-    pub(crate) fn add(self, val: Type) -> Result<VecType<Self>, Error> {
+impl Int {
+    pub(crate) fn add(self, val: Type) -> Result<VecType<Self>, String> {
         let val = match val {
             Type::Int(i) => i,
-            _ => return Err(Error::Span(val.span())),
+            _ => return Err(format!("Cannot use + for `{}` and `{}` types", self, val)),
         };
-        let span = self.span;
-        let inner = self.inner();
         val.kinds
-            .0
+            .inner()
             .into_iter()
             .map(|val| {
-                let _span = val.span;
-                let val = match val.inner() {
-                    Int::Value(v) => *v,
-                    _ => return Err(Error::Span(_span)),
+                let val = match val {
+                    Int::Value(v) => v,
+                    _ => return Err(format!("Cannot use + for `{}` and `{}` types", self, val)),
                 };
-                Ok(Spanned::new(
-                    match inner.clone() {
-                        Int::Value(v) => Int::Value(v + val),
-                        Int::Bound(b) => Int::Bound(
-                            b.add(val)
-                                .map_err(|e| Error::Custom(span, e, "-here".to_string()))?,
-                        ),
-                        Int::KnownBound { low, high } => Int::KnownBound {
-                            low: low + val,
-                            high: high + val,
-                        },
-                        Int::Slice(s) => Int::Slice(
-                            Slice {
-                                from: s.from + val,
-                                step: s.step,
-                                to: s.to + val,
-                            }
-                        ),
+                Ok(match self.clone() {
+                    Int::Value(v) => Int::Value(v + val),
+                    Int::Bound(b) => Int::Bound(b.add(val)?),
+                    Int::KnownBound { low, high } => Int::KnownBound {
+                        low: low + val,
+                        high: high + val,
                     },
-                    span,
-                ))
+                    Int::Slice(s) => Int::Slice(Slice {
+                        from: s.from + val,
+                        step: s.step,
+                        to: s.to + val,
+                    }),
+                })
             })
             .collect()
     }
-    pub fn neg(self) -> Result<Self, Error> {
-        let span = self.span;
-        match self.inner() {
-            Int::Value(v) => Ok(Spanned::new(Int::Value(-v), span)),
+    pub fn neg(self) -> Result<Self, String> {
+        match self {
+            Int::Value(v) => Ok(Int::Value(-v)),
             Int::Bound(bound) => match bound {
-                OneRangeIntBound::High(h) => Ok(Spanned::new(Int::Bound(OneRangeIntBound::High(-h)), span)),
-                OneRangeIntBound::Low(l) => Ok(Spanned::new(Int::Bound(OneRangeIntBound::Low(-l)), span)),
-                OneRangeIntBound::NotEqual(n) => Ok(Spanned::new(Int::Bound(OneRangeIntBound::NotEqual(-n)), span)),
-                OneRangeIntBound::None => Err(Error::Span(span)),
-            }
-            Int::KnownBound { low, high } => Ok(Spanned::new(
-                Int::KnownBound { low: -low, high: -high }, span,
-            )),
-            Int::Slice(s) => Ok(Spanned::new(Int::Slice(Slice { to: -s.to, step: s.step, from: -s.from }), span))
+                OneRangeIntBound::High(h) => Ok(Int::Bound(OneRangeIntBound::High(-h))),
+                OneRangeIntBound::Low(l) => Ok(Int::Bound(OneRangeIntBound::Low(-l))),
+                OneRangeIntBound::NotEqual(n) => Ok(Int::Bound(OneRangeIntBound::NotEqual(-n))),
+                OneRangeIntBound::None => Err(format!("Cannot apply - for `Unknown` type")),
+            },
+            Int::KnownBound { low, high } => Ok(Int::KnownBound {
+                low: -low,
+                high: -high,
+            }),
+            Int::Slice(s) => Ok(Int::Slice(Slice {
+                to: -s.to,
+                step: s.step,
+                from: -s.from,
+            })),
         }
     }
 }
 
-impl Spanned<Int> {
-    pub(crate) fn try_convert_to_value(self, value: Spanned<i128>) -> Result<VecType<Self>, Error> {
-        match &*self {
-            Int::Value(i) if *i == value => Ok(VecType::one(self)),
+impl Int {
+    pub(crate) fn try_convert_to_value(self, value: i128) -> Result<VecType<Self>, String> {
+        match self {
+            Int::Value(i) if i == value => Ok(VecType::one(self)),
+            Int::Bound(OneRangeIntBound::None) => Ok(VecType::one(Int::Value(value))),
+            Int::Bound(OneRangeIntBound::Low(low)) if low <= value => {
+                Ok(VecType::one(Int::Value(value)))
+            }
+            Int::Bound(OneRangeIntBound::High(high)) if high >= value => {
+                Ok(VecType::one(Int::Value(value)))
+            }
+            Int::Bound(OneRangeIntBound::NotEqual(i)) => {
+                Int::Bound(OneRangeIntBound::High(value)).try_add_not_eq_bound(i.clone())
+            }
+            Int::KnownBound { low, high } if low <= value && high >= value => {
+                Ok(VecType::one(Int::Value(value)))
+            }
+            Int::Slice(s) if s.contain(value) => Ok(VecType::one(Int::Value(value))),
+            _ => Err(format!("Void type!")),
+        }
+    }
+    pub(crate) fn try_add_low_bound(self, value: i128) -> Result<VecType<Self>, String> {
+        match self {
+            Int::Value(i) if i >= value => Ok(VecType::one(Int::Value(i))),
             Int::Bound(OneRangeIntBound::None) => {
-                Ok(VecType::one(Spanned::new(Int::Value(value), self.span)))
+                Ok(VecType::one(Int::Bound(OneRangeIntBound::Low(value))))
             }
-            Int::Bound(OneRangeIntBound::Low(low)) if *low <= value => {
-                Ok(VecType::one(Spanned::new(Int::Value(value), self.span)))
-            }
-            Int::Bound(OneRangeIntBound::High(high)) if *high >= value => {
-                Ok(VecType::one(Spanned::new(Int::Value(value), self.span)))
+            Int::Bound(OneRangeIntBound::Low(low)) => Ok(VecType::one(Int::Bound(
+                OneRangeIntBound::Low(max(low, value)),
+            ))),
+            Int::Bound(OneRangeIntBound::High(high)) if high >= value => {
+                Ok(VecType::one(Int::KnownBound { low: value, high }))
             }
             Int::Bound(OneRangeIntBound::NotEqual(i)) => {
-                Spanned::new(Int::Bound(OneRangeIntBound::High(value)), self.span)
-                    .try_add_not_eq_bound(i.clone())
+                Int::Bound(OneRangeIntBound::Low(value)).try_add_not_eq_bound(i)
             }
-            Int::KnownBound { low, high } if *low <= value && *high >= value => {
-                Ok(VecType::one(Spanned::new(Int::Value(value), self.span)))
-            }
-            Int::Slice(s) if s.contain(*value) => {
-                Ok(VecType::one(Spanned::new(Int::Value(value), self.span)))
-            }
-            _ => Err(Error::NotHaveType(self.span)),
+            Int::KnownBound { low, high } if value <= high => Ok(VecType::one(Int::KnownBound {
+                low: max(value, low),
+                high,
+            })),
+            Int::Slice(s) => Ok(VecType::one(Int::Slice(s.try_change_low_bound(value)?))),
+            _ => Err(format!("Void type!")),
         }
     }
-    pub(crate) fn try_add_low_bound(self, value: Spanned<i128>) -> Result<VecType<Self>, Error> {
-        let span = self.span;
-        match self.inner() {
-            Int::Value(i) if i >= value => Ok(VecType::one(Spanned::new(Int::Value(i), span))),
-            Int::Bound(OneRangeIntBound::None) => Ok(VecType::one(Spanned::new(
-                Int::Bound(OneRangeIntBound::Low(value)),
-                span,
+    pub(crate) fn try_add_high_bound(self, value: i128) -> Result<VecType<Self>, String> {
+        match self {
+            Int::Value(i) if i <= value => Ok(VecType::one(Int::Value(i))),
+            Int::Bound(OneRangeIntBound::None) => {
+                Ok(VecType::one(Int::Bound(OneRangeIntBound::High(value))))
+            }
+            Int::Bound(OneRangeIntBound::High(high)) => Ok(VecType::one(Int::Bound(
+                OneRangeIntBound::High(min(high, value)),
             ))),
-            Int::Bound(OneRangeIntBound::Low(low)) => Ok(VecType::one(Spanned::new(
-                Int::Bound(OneRangeIntBound::Low(max(low, value))),
-                span,
-            ))),
-            Int::Bound(OneRangeIntBound::High(high)) if high >= value => Ok(VecType::one(
-                Spanned::new(Int::KnownBound { low: value, high }, span),
-            )),
+            Int::Bound(OneRangeIntBound::Low(low)) if low <= value => {
+                Ok(VecType::one(Int::KnownBound { low, high: value }))
+            }
             Int::Bound(OneRangeIntBound::NotEqual(i)) => {
-                Spanned::new(Int::Bound(OneRangeIntBound::Low(value)), span).try_add_not_eq_bound(i)
+                Int::Bound(OneRangeIntBound::High(value)).try_add_not_eq_bound(i)
             }
-            Int::KnownBound { low, high } if value <= high => Ok(VecType::one(Spanned::new(
-                Int::KnownBound {
-                    low: max(value, low),
-                    high,
-                },
-                span,
-            ))),
-            Int::Slice(s) => Ok(VecType::one(Spanned::new(
-                Int::Slice(s.try_change_low_bound(*value).map_err(|_| Error::Span(span))?),
-                span,
-            ))),
-            _ => Err(Error::NotHaveType(span)),
+            Int::KnownBound { low, high } if low <= value => Ok(VecType::one(Int::KnownBound {
+                low,
+                high: min(value, high),
+            })),
+            Int::Slice(s) => Ok(VecType::one(Int::Slice(s.try_change_high_bound(value)?))),
+            _ => Err(format!("Void type!")),
         }
     }
-    pub(crate) fn try_add_high_bound(self, value: Spanned<i128>) -> Result<VecType<Self>, Error> {
-        let span = self.span;
-        match self.inner() {
-            Int::Value(i) if i <= value => Ok(VecType::one(Spanned::new(Int::Value(i), span))),
-            Int::Bound(OneRangeIntBound::None) => Ok(VecType::one(Spanned::new(
-                Int::Bound(OneRangeIntBound::High(value)),
-                span,
-            ))),
-            Int::Bound(OneRangeIntBound::High(high)) => Ok(VecType::one(Spanned::new(
-                Int::Bound(OneRangeIntBound::High(min(high, value))),
-                span,
-            ))),
-            Int::Bound(OneRangeIntBound::Low(low)) if low <= value => Ok(VecType::one(
-                Spanned::new(Int::KnownBound { low, high: value }, span),
-            )),
-            Int::Bound(OneRangeIntBound::NotEqual(i)) => {
-                Spanned::new(Int::Bound(OneRangeIntBound::High(value)), span)
-                    .try_add_not_eq_bound(i)
-            }
-            Int::KnownBound { low, high } if low <= value => Ok(VecType::one(Spanned::new(
-                Int::KnownBound {
-                    low,
-                    high: min(value, high),
-                },
-                span,
-            ))),
-            Int::Slice(s) => Ok(VecType::one(Spanned::new(
-                Int::Slice(s.try_change_high_bound(*value).map_err(|_| Error::Span(span))?),
-                span,
-            ))),
-            _ => Err(Error::NotHaveType(span)),
-        }
-    }
-    pub(crate) fn extend_with_other(self, other: Self) -> Result<VecType<Self>, Error> {
-        match other.inner() {
+    pub(crate) fn extend_with_other(self, other: Self) -> Result<VecType<Self>, String> {
+        match other {
             Int::Value(i) => self.try_convert_to_value(i),
             Int::Bound(OneRangeIntBound::None) => Ok(VecType::one(self)),
             Int::Bound(OneRangeIntBound::Low(l)) => self.try_add_low_bound(l),
@@ -279,151 +264,107 @@ impl Spanned<Int> {
             Int::Slice(s) => self.try_add_slice_bound(s),
         }
     }
-    pub(crate) fn try_add_not_eq_bound(self, value: Spanned<i128>) -> Result<VecType<Self>, Error> {
-        let span = self.span;
-        match self.inner() {
-            Int::Value(i) if i != value => Ok(VecType::one(Spanned::new(Int::Value(i), span))),
-            Int::Bound(OneRangeIntBound::None) => Ok(VecType::one(Spanned::new(
-                Int::Bound(OneRangeIntBound::NotEqual(value)),
-                span,
-            ))),
-            Int::Bound(OneRangeIntBound::High(high)) if *high - 1 > *value => Ok(VecType(vec![
-                Spanned::new(
-                    Int::KnownBound {
-                        low: high,
-                        high: value.clone() - 1,
-                    },
-                    span,
-                ),
-                Spanned::new(Int::Bound(OneRangeIntBound::High(value.clone() + 1)), span),
-            ])),
-            Int::Bound(OneRangeIntBound::High(high)) if *high - 1 == *value => Ok(VecType(vec![
-                Spanned::new(Int::Value(high), span),
-                Spanned::new(Int::Bound(OneRangeIntBound::High(value.clone() + 1)), span),
-            ])),
-            Int::Bound(OneRangeIntBound::High(high)) if *high == *value => Ok(VecType::one(
-                Spanned::new(Int::Bound(OneRangeIntBound::High(high + 1)), span),
-            )),
-            Int::Bound(OneRangeIntBound::High(high)) => Ok(VecType::one(Spanned::new(
-                Int::Bound(OneRangeIntBound::High(high)),
-                span,
-            ))),
-            Int::Bound(OneRangeIntBound::Low(low)) if *low + 1 < *value => Ok(VecType(vec![
-                Spanned::new(
-                    Int::KnownBound {
-                        low,
-                        high: value.clone() - 1,
-                    },
-                    span,
-                ),
-                Spanned::new(Int::Bound(OneRangeIntBound::Low(value.clone() + 1)), span),
-            ])),
-            Int::Bound(OneRangeIntBound::Low(low)) if *low + 1 == *value => Ok(VecType(vec![
-                Spanned::new(Int::Value(low), span),
-                Spanned::new(Int::Bound(OneRangeIntBound::Low(value.clone() + 1)), span),
-            ])),
-            Int::Bound(OneRangeIntBound::Low(low)) if *low == *value => Ok(VecType::one(
-                Spanned::new(Int::Bound(OneRangeIntBound::Low(low + 1)), span),
-            )),
-            Int::Bound(OneRangeIntBound::Low(low)) => Ok(VecType::one(Spanned::new(
-                Int::Bound(OneRangeIntBound::Low(low)),
-                span,
-            ))),
-            Int::KnownBound { low, high } if *low + 1 < *value && *value < *high - 1 => {
-                Ok(VecType(vec![
-                    Spanned::new(
-                        Int::KnownBound {
-                            low,
-                            high: value.clone() - 1,
-                        },
-                        span,
-                    ),
-                    Spanned::new(
-                        Int::KnownBound {
-                            low: value + 1,
-                            high,
-                        },
-                        span,
-                    ),
-                ]))
+    pub(crate) fn try_add_not_eq_bound(self, value: i128) -> Result<VecType<Self>, String> {
+        match self {
+            Int::Value(i) if i != value => Ok(VecType::one(Int::Value(i))),
+            Int::Bound(OneRangeIntBound::None) => {
+                Ok(VecType::one(Int::Bound(OneRangeIntBound::NotEqual(value))))
             }
-            Int::KnownBound { low, high } if *low + 1 == *value => Ok(VecType(vec![
-                Spanned::new(Int::Value(low), span),
-                Spanned::new(
-                    Int::KnownBound {
-                        low: value + 1,
-                        high,
-                    },
-                    span,
-                ),
-            ])),
-            Int::KnownBound { low, high } if *low == *value => Ok(VecType::one(Spanned::new(
+            Int::Bound(OneRangeIntBound::High(high)) if high - 1 > value => Ok(VecType(vec![
                 Int::KnownBound {
-                    low: value + 1,
-                    high,
+                    low: high,
+                    high: value - 1,
                 },
-                span,
-            ))),
-            Int::KnownBound { low, high } if *high - 1 == *value => Ok(VecType(vec![
-                Spanned::new(Int::Value(high), span),
-                Spanned::new(
-                    Int::KnownBound {
-                        low,
-                        high: value - 1,
-                    },
-                    span,
-                ),
+                Int::Bound(OneRangeIntBound::High(value + 1)),
             ])),
-            Int::KnownBound { low, high } if *high == *value => Ok(VecType::one(Spanned::new(
+            Int::Bound(OneRangeIntBound::High(high)) if high - 1 == value => Ok(VecType(vec![
+                Int::Value(high),
+                Int::Bound(OneRangeIntBound::High(value + 1)),
+            ])),
+            Int::Bound(OneRangeIntBound::High(high)) if high == value => {
+                Ok(VecType::one(Int::Bound(OneRangeIntBound::High(high + 1))))
+            }
+            Int::Bound(OneRangeIntBound::High(high)) => {
+                Ok(VecType::one(Int::Bound(OneRangeIntBound::High(high))))
+            }
+            Int::Bound(OneRangeIntBound::Low(low)) if low + 1 < value => Ok(VecType(vec![
                 Int::KnownBound {
                     low,
                     high: value - 1,
                 },
-                span,
-            ))),
-            Int::KnownBound { low, high } => Ok(VecType::one(Spanned::new(
-                Int::KnownBound { low, high },
-                span,
-            ))),
-            Int::Slice(s) => {
-                let res = s.try_split(*value)?;
-                Ok(res
-                    .into_iter()
-                    .map(Int::Slice)
-                    .map(|e| Spanned::new(e, span))
-                    .collect())
+                Int::Bound(OneRangeIntBound::Low(value + 1)),
+            ])),
+            Int::Bound(OneRangeIntBound::Low(low)) if low + 1 == value => Ok(VecType(vec![
+                Int::Value(low),
+                Int::Bound(OneRangeIntBound::Low(value + 1)),
+            ])),
+            Int::Bound(OneRangeIntBound::Low(low)) if low == value => {
+                Ok(VecType::one(Int::Bound(OneRangeIntBound::Low(low + 1))))
             }
-            _ => Err(Error::NotHaveType(span)),
+            Int::Bound(OneRangeIntBound::Low(low)) => {
+                Ok(VecType::one(Int::Bound(OneRangeIntBound::Low(low))))
+            }
+            Int::KnownBound { low, high } if low + 1 < value && value < high - 1 => {
+                Ok(VecType(vec![
+                    Int::KnownBound {
+                        low,
+                        high: value - 1,
+                    },
+                    Int::KnownBound {
+                        low: value + 1,
+                        high,
+                    },
+                ]))
+            }
+            Int::KnownBound { low, high } if low + 1 == value => Ok(VecType(vec![
+                Int::Value(low),
+                Int::KnownBound {
+                    low: value + 1,
+                    high,
+                },
+            ])),
+            Int::KnownBound { low, high } if low == value => Ok(VecType::one(Int::KnownBound {
+                low: value + 1,
+                high,
+            })),
+            Int::KnownBound { low, high } if high - 1 == value => Ok(VecType(vec![
+                Int::Value(high),
+                Int::KnownBound {
+                    low,
+                    high: value - 1,
+                },
+            ])),
+            Int::KnownBound { low, high } if high == value => Ok(VecType::one(Int::KnownBound {
+                low,
+                high: value - 1,
+            })),
+            Int::KnownBound { low, high } => Ok(VecType::one(Int::KnownBound { low, high })),
+            Int::Slice(s) => {
+                let res = s.try_split(value)?;
+                Ok(res.into_iter().map(Int::Slice).collect())
+            }
+            _ => Err(format!("Void type!")),
         }
     }
-    pub(crate) fn try_add_slice_bound(self, value: Slice) -> Result<VecType<Self>, Error> {
-        let span = self.span;
-        match self.inner() {
-            Int::Value(i) if value.contain(*i) => {
-                Ok(VecType::one(Spanned::new(Int::Value(i), span)))
+    pub(crate) fn try_add_slice_bound(self, value: Slice) -> Result<VecType<Self>, String> {
+        match self {
+            Int::Value(i) if value.contain(i) => Ok(VecType::one(Int::Value(i))),
+            Int::Bound(OneRangeIntBound::None) => Ok(VecType::one(Int::Slice(value))),
+            Int::Bound(OneRangeIntBound::Low(low)) => {
+                Ok(VecType::one(Int::Slice(value.try_change_low_bound(low)?)))
             }
-            Int::Bound(OneRangeIntBound::None) => {
-                Ok(VecType::one(Spanned::new(Int::Slice(value), span)))
+            Int::Bound(OneRangeIntBound::High(high)) => {
+                Ok(VecType::one(Int::Slice(value.try_change_high_bound(high)?)))
             }
-            Int::Bound(OneRangeIntBound::Low(low)) => Ok(VecType::one(Spanned::new(
-                Int::Slice(value.try_change_low_bound(*low).map_err(|_| Error::Span(span))?),
-                span,
-            ))),
-            Int::Bound(OneRangeIntBound::High(high)) => Ok(VecType::one(Spanned::new(
-                Int::Slice(value.try_change_high_bound(*high).map_err(|_| Error::Span(span))?),
-                span,
-            ))),
-            Int::Bound(OneRangeIntBound::NotEqual(i)) => {
-                Spanned::new(Int::Slice(value), span).try_add_not_eq_bound(i)
-            }
+            Int::Bound(OneRangeIntBound::NotEqual(i)) => Int::Slice(value).try_add_not_eq_bound(i),
             Int::KnownBound { low, high } => {
                 let slice = value
-                    .try_change_low_bound(*low)?
-                    .try_change_high_bound(*high)?;
-                Ok(VecType::one(Spanned::new(Int::Slice(slice), span)))
+                    .try_change_low_bound(low)?
+                    .try_change_high_bound(high)?;
+                Ok(VecType::one(Int::Slice(slice)))
             }
             Int::Slice(_) => unimplemented!(),
-            _ => Err(Error::NotHaveType(span)),
+            _ => Err(format!("Void type!")),
         }
     }
 }
@@ -431,9 +372,9 @@ impl Spanned<Int> {
 #[derive(Debug, PartialEq, Clone)]
 pub enum OneRangeIntBound {
     None,
-    NotEqual(Spanned<i128>),
-    Low(Spanned<i128>),
-    High(Spanned<i128>),
+    NotEqual(i128),
+    Low(i128),
+    High(i128),
 }
 
 impl Display for OneRangeIntBound {
@@ -469,23 +410,21 @@ impl Slice {
     pub fn contain(&self, v: i128) -> bool {
         v >= self.from && v <= self.to && (v - self.from) % self.step == 0
     }
-    pub fn try_change_low_bound(self, v: i128) -> Result<Self, Error> {
+    pub fn try_change_low_bound(self, v: i128) -> Result<Self, String> {
         match v > self.to {
-            true => Err(Error::NotSpan),
-            false => Ok(Slice { from: v, ..self })
+            true => Err(format!("Void type!")),
+            false => Ok(Slice { from: v, ..self }),
         }
     }
-    pub fn try_change_high_bound(self, v: i128) -> Result<Self, Error> {
+    pub fn try_change_high_bound(self, v: i128) -> Result<Self, String> {
         match v < self.from {
-            true => Err(Error::NotSpan),
-            false => Ok(Slice { to: v, ..self })
+            true => Err(format!("Void type!")),
+            false => Ok(Slice { to: v, ..self }),
         }
     }
-    pub fn try_split(self, v: i128) -> Result<Vec<Self>, Error> {
+    pub fn try_split(self, v: i128) -> Result<Vec<Self>, String> {
         match self.contain(v) {
-            true => {
-                unimplemented!()
-            }
+            true => unimplemented!(),
             false => unimplemented!(),
         }
     }

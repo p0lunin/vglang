@@ -51,36 +51,36 @@ impl<T> FromIterator<T> for VecType<T> {
     }
 }
 
-impl VecType<Spanned<Int>> {
-    pub fn try_convert_to_value(self, value: Spanned<i128>) -> Result<Self, Error> {
+impl VecType<Int> {
+    pub fn try_convert_to_value(self, value: i128) -> Result<Self, String> {
         self.0
             .into_iter()
             .map(|i| i.try_convert_to_value(value.clone()))
             .collect::<Result<Vec<_>, _>>()
             .map(|res| res.into_iter().next().unwrap())
     }
-    pub fn try_add_low_bound(self, value: Spanned<i128>) -> Result<Self, Error> {
+    pub fn try_add_low_bound(self, value: i128) -> Result<Self, String> {
         self.0
             .into_iter()
             .map(|i| i.try_add_low_bound(value.clone()))
             .collect::<Result<Vec<_>, _>>()
             .map(|r| r.into_iter().flatten().collect::<Self>())
     }
-    pub fn try_add_high_bound(self, value: Spanned<i128>) -> Result<Self, Error> {
+    pub fn try_add_high_bound(self, value: i128) -> Result<Self, String> {
         self.0
             .into_iter()
             .map(|i| i.try_add_high_bound(value.clone()))
             .collect::<Result<Vec<_>, _>>()
             .map(|r| r.into_iter().flatten().collect::<Self>())
     }
-    pub fn try_add_not_eq_bound(self, value: Spanned<i128>) -> Result<Self, Error> {
+    pub fn try_add_not_eq_bound(self, value: i128) -> Result<Self, String> {
         self.0
             .into_iter()
             .map(|i| i.try_add_not_eq_bound(value.clone()))
             .collect::<Result<Vec<_>, _>>()
             .map(|r| r.into_iter().flatten().collect::<Self>())
     }
-    pub fn try_add_slice_bound(self, value: Slice) -> Result<Self, Error> {
+    pub fn try_add_slice_bound(self, value: Slice) -> Result<Self, String> {
         self.0
             .into_iter()
             .map(|i| i.try_add_slice_bound(value.clone()))

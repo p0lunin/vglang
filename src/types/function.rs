@@ -1,9 +1,9 @@
 use crate::error::Error;
 use crate::parser::{FunctionDef, FunctionImpl};
 use crate::spanned::Spanned;
-use crate::types::{Type, OneTypeKind, TypeOperable};
-use std::rc::Rc;
+use crate::types::{OneTypeKind, Type, TypeOperable};
 use std::fmt::{Display, Formatter};
+use std::rc::Rc;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Function {
@@ -13,8 +13,8 @@ pub struct Function {
 
 impl Function {
     pub fn is_part_of(&self, other: &Function) -> bool {
-        other.get_value.is_part_of(&self.get_value) &&
-            self.return_value.is_part_of(&other.return_value)
+        other.get_value.is_part_of(&self.get_value)
+            && self.return_value.is_part_of(&other.return_value)
     }
 }
 
@@ -28,36 +28,20 @@ impl Display for Function {
 }
 
 impl TypeOperable<Function> for OneTypeKind<Function> {
-    fn add(self, right: Type) -> Result<Self, Error> {
-        Err(Error::Custom(
-            right.span(),
-            "+ is not allowed for `Function` value".to_owned(),
-            "-here".to_owned(),
-        ))
+    fn add(self, right: Type) -> Result<Self, String> {
+        Err("+ is not allowed for `Function` value".to_owned())
     }
 
-    fn neg(self) -> Result<Self, Error> {
-        Err(Error::Custom(
-            self.kind.span,
-            "- is not allowed for `Function` value".to_owned(),
-            "-here".to_owned(),
-        ))
+    fn neg(self) -> Result<Self, String> {
+        Err("- is not allowed for `Function` value".to_owned())
     }
 
-    fn and(self, right: Type) -> Result<Self, Error> {
-        Err(Error::Custom(
-            right.span(),
-            "& is not allowed for `Function` value".to_owned(),
-            "-here".to_owned(),
-        ))
+    fn and(self, right: Type) -> Result<Self, String> {
+        Err("& is not allowed for `Function` value".to_owned())
     }
 
-    fn or(self, right: Type) -> Result<Self, Error> {
-        Err(Error::Custom(
-            right.span(),
-            "| is not allowed for `Function` value".to_owned(),
-            "-here".to_owned(),
-        ))
+    fn or(self, right: Type) -> Result<Self, String> {
+        Err("| is not allowed for `Function` value".to_owned())
     }
 }
 

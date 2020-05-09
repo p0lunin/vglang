@@ -1,17 +1,28 @@
 use crate::error::Error;
 use crate::parser::{Ast, FunctionDef, FunctionImpl, Ident, Token};
 use crate::spanned::Spanned;
+use crate::type_check::Context;
 use crate::types::{
     parse_type, parse_type_helper, Int, Type, TypeKind, TypeOperable, TypeType, VecType,
 };
 use std::rc::Rc;
-use crate::type_check::Context;
+use std::fmt::{Display, Formatter, Debug};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum AllObject {
     Type(Rc<Object<Rc<Spanned<Type>>>>),
     Function(Rc<Object<FunctionObject>>),
     Var(Rc<Object<Var>>),
+}
+
+impl Display for AllObject {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match self {
+            AllObject::Type(t) => f.write_str(&format!("{}", t.object)),
+            AllObject::Function(t) => f.write_str(&format!("{}", t.object)),
+            AllObject::Var(v) => unimplemented!(),
+        }
+    }
 }
 
 impl AllObject {
@@ -49,6 +60,20 @@ pub struct FunctionObject {
     pub return_value: Rc<Spanned<Type>>,
     pub body: Expr,
 }
+
+impl Display for FunctionObject {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "Function:\n")?;
+        write!(f, "Name: {}\n", self.name)?;
+        write!(f, "Args:\n")?;
+        self.args.iter().for_each(|a| {
+            write!(f, "    {}\n", a.object_type);
+        });
+        write!(f, "Return: {}\n", self.return_value)?;
+        Ok(())
+    }
+}
+
 impl Objectable for FunctionObject {
     type Type = Type;
 }
@@ -63,7 +88,7 @@ pub enum Expr {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct Var(Spanned<String>);
+pub struct Var(pub Spanned<String>);
 impl Objectable for Var {
     type Type = Type;
 }
@@ -99,10 +124,12 @@ pub fn parse_function(
             let args = args
                 .into_iter()
                 .zip(arg_types.into_iter())
-                .map(|(v, t)| Rc::new(Object {
-                    object: Var(v.map(|i| i.0)),
-                    object_type: t,
-                }))
+                .map(|(v, t)| {
+                    Rc::new(Object {
+                        object: Var(v.map(|i| i.0)),
+                        object_type: t,
+                    })
+                })
                 .collect::<Vec<_>>();
             let ctx = Context {
                 objects: args.iter().map(|v| AllObject::Var(v.clone())).collect(),
@@ -117,7 +144,7 @@ pub fn parse_function(
                 },
                 object_type: func_type,
             })))
-        },
+        }
     }
 }
 
@@ -128,10 +155,10 @@ pub fn parse_expr(token: Token, ctx: &Context) -> Result<Expr, Error> {
                 data: Spanned::new(i, token.span),
             },
             object_type: Rc::new(Spanned::new(
-                Type::Int(TypeKind::from_kinds(VecType::one(Spanned::new(
-                    Int::Value(Spanned::new(i, token.span)),
+                Type::Int(TypeKind::from_kinds(Spanned::new(
+                    VecType::one(Int::Value(i)),
                     token.span,
-                )))),
+                ))),
                 token.span,
             )),
         })),
@@ -143,16 +170,18 @@ pub fn parse_expr(token: Token, ctx: &Context) -> Result<Expr, Error> {
             Box::new(parse_expr(*l, ctx)?),
             Box::new(parse_expr(*r, ctx)?),
         )),
-        Ast::Ident(i) => {
-            match ctx.find(&i.0) {
-                Some(o) => match o {
-                    AllObject::Function(f) => Ok(Expr::CallFunction(f.clone())),
-                    AllObject::Var(v) => Ok(Expr::Var(v.clone())),
-                    _ => unimplemented!(),
-                }
-                _ => Err(Error::Custom(token.span, format!("{} not found", i.0), "-here".to_owned())),
-            }
-        }
+        Ast::Ident(i) => match ctx.find(&i.0) {
+            Some(o) => match o {
+                AllObject::Function(f) => Ok(Expr::CallFunction(f.clone())),
+                AllObject::Var(v) => Ok(Expr::Var(v.clone())),
+                _ => unimplemented!(),
+            },
+            _ => Err(Error::Custom(
+                token.span,
+                format!("{} not found", i.0),
+                "-here".to_owned(),
+            )),
+        },
         _ => unimplemented!(),
     }
 }
