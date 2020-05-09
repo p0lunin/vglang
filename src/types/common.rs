@@ -28,10 +28,15 @@ impl Type {
     pub fn is_part_of(&self, other: &Type) -> bool {
         match (self, other) {
             (Type::Function(l), Type::Function(r)) => l.kind.is_part_of(&r.kind),
-            (Type::Int(l), Type::Int(r)) => l
-                .kinds
-                .iter()
-                .all(|l| r.kinds.iter().any(|r| l.is_part_of(r))),
+            (Type::Int(l), Type::Int(r)) => {
+                match l.kinds.is_empty() {
+                    true => false,
+                    false => l
+                        .kinds
+                        .iter()
+                        .all(|l| r.kinds.iter().any(|r| l.is_part_of(r)))
+                }
+            },
             (_, Type::Type(_)) => true,
             (Type::AnotherType(l), r) => l.is_part_of(r),
             (l, Type::AnotherType(r)) => l.is_part_of(r),
@@ -244,11 +249,10 @@ pub struct TypeKind<T> {
     pub kinds: Spanned<VecType<T>>,
 }
 
-impl<T: Display> Display for TypeKind<T> {
+impl<T: Display + Debug> Display for TypeKind<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(f, "Type:\n")?;
         match &self.name {
-            Some(name) => f.write_str(&format!("Name: {}\n", name))?,
+            Some(name) => f.write_str(&format!("{}: ", name))?,
             None => {}
         };
         f.write_str(

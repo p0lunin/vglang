@@ -5,8 +5,8 @@ use crate::type_check::Context;
 use crate::types::{
     parse_type, parse_type_helper, Int, Type, TypeKind, TypeOperable, TypeType, VecType,
 };
+use std::fmt::{Debug, Display, Formatter};
 use std::rc::Rc;
-use std::fmt::{Display, Formatter, Debug};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum AllObject {
@@ -85,6 +85,7 @@ pub enum Expr {
     Sub(Box<Expr>, Box<Expr>),
     CallFunction(Rc<Object<FunctionObject>>),
     Var(Rc<Object<Var>>),
+    Type(Rc<Object<Rc<Spanned<Type>>>>),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -174,6 +175,12 @@ pub fn parse_expr(token: Token, ctx: &Context) -> Result<Expr, Error> {
             Some(o) => match o {
                 AllObject::Function(f) => Ok(Expr::CallFunction(f.clone())),
                 AllObject::Var(v) => Ok(Expr::Var(v.clone())),
+                AllObject::Type(t) => Ok(Expr::Type(
+                    Rc::new(Object {
+                        object: Rc::new(Spanned::new(Type::AnotherType(Spanned::new(t.object.clone(), token.span)), token.span)),
+                        object_type: t.object_type.clone(),
+                    })
+                )),
                 _ => unimplemented!(),
             },
             _ => Err(Error::Custom(

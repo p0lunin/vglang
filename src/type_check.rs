@@ -121,5 +121,9 @@ fn type_check_expr(expr: Expr, ctx: &Context) -> Result<Rc<Spanned<Type>>, Error
             Type::AnotherType(Spanned::new(v.object_type.clone(), v.object.0.span)),
             v.object.0.span,
         ))),
+        Expr::Type(t) => Ok(Rc::new(Spanned::new(
+            Type::AnotherType(Spanned::new(t.object.clone(), t.object.span)),
+            t.object.span,
+        ))),
     }
 }
