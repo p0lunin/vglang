@@ -21,6 +21,7 @@ pub enum Type {
     Int(TypeKind<Int>),
     Type(OneTypeKind<TypeType>),
     Unknown(OneTypeKind<Unknown>),
+    ParenthesisType(Box<Type>),
     AnotherType(Spanned<Rc<Spanned<Type>>>),
 }
 
@@ -28,18 +29,18 @@ impl Type {
     pub fn is_part_of(&self, other: &Type) -> bool {
         match (self, other) {
             (Type::Function(l), Type::Function(r)) => l.kind.is_part_of(&r.kind),
-            (Type::Int(l), Type::Int(r)) => {
-                match l.kinds.is_empty() {
-                    true => false,
-                    false => l
-                        .kinds
-                        .iter()
-                        .all(|l| r.kinds.iter().any(|r| l.is_part_of(r)))
-                }
+            (Type::Int(l), Type::Int(r)) => match l.kinds.is_empty() {
+                true => false,
+                false => l
+                    .kinds
+                    .iter()
+                    .all(|l| r.kinds.iter().any(|r| l.is_part_of(r))),
             },
             (_, Type::Type(_)) => true,
             (Type::AnotherType(l), r) => l.is_part_of(r),
             (l, Type::AnotherType(r)) => l.is_part_of(r),
+            (Type::ParenthesisType(l), r) => l.is_part_of(r),
+            (l, Type::ParenthesisType(r)) => l.is_part_of(r),
             _ => false,
         }
     }
@@ -52,7 +53,8 @@ impl Display for Type {
             Type::Int(t) => Display::fmt(t, f),
             Type::Type(_) => f.write_str("Type"),
             Type::Unknown(_) => f.write_str("Unknown"),
-            Type::AnotherType(t) => f.write_str(t.name()),
+            Type::AnotherType(t) => Display::fmt(t, f),
+            Type::ParenthesisType(t) => Display::fmt(t, f),
         }
     }
 }
@@ -65,6 +67,7 @@ impl Type {
             Type::Unknown(u) => u.span(),
             Type::Function(t) => t.span(),
             Type::AnotherType(t) => t.span(),
+            Type::ParenthesisType(t) => t.span(),
         }
     }
 
@@ -75,6 +78,7 @@ impl Type {
             Type::Unknown(t) => t.name = Some(name),
             Type::Function(t) => t.name = Some(name),
             Type::AnotherType(t) => {}
+            Type::ParenthesisType(t) => {}
         }
     }
 
@@ -85,6 +89,7 @@ impl Type {
             Type::Unknown(t) => t.name = None,
             Type::Function(t) => t.name = None,
             Type::AnotherType(t) => unimplemented!(),
+            Type::ParenthesisType(t) => unimplemented!(),
         }
     }
 
@@ -98,6 +103,10 @@ impl Type {
                 let mut inner = (***t).clone();
                 inner.remove_name();
                 inner.op_add(value)
+            }
+            Type::ParenthesisType(mut t) => {
+                t.remove_name();
+                t.op_add(value)
             }
         }
     }
@@ -113,6 +122,10 @@ impl Type {
                 inner.remove_name();
                 inner.op_add(value.op_neg()?)
             }
+            Type::ParenthesisType(mut t) => {
+                t.remove_name();
+                t.op_add(value.op_neg()?)
+            }
         }
     }
 
@@ -126,6 +139,10 @@ impl Type {
                 let mut inner = (***t).clone();
                 inner.remove_name();
                 inner.op_and(value)
+            }
+            Type::ParenthesisType(mut t) => {
+                t.remove_name();
+                t.op_and(value)
             }
         }
     }
@@ -141,6 +158,10 @@ impl Type {
                 inner.remove_name();
                 inner.op_or(value)
             }
+            Type::ParenthesisType(mut t) => {
+                t.remove_name();
+                t.op_or(value)
+            }
         }
     }
 
@@ -154,6 +175,10 @@ impl Type {
                 let mut inner = (***t).clone();
                 inner.remove_name();
                 inner.op_neg()
+            }
+            Type::ParenthesisType(mut t) => {
+                t.remove_name();
+                t.op_neg()
             }
         }
     }
@@ -229,6 +254,7 @@ impl Type {
                 .map(|s| s.as_str())
                 .unwrap_or("anonymous type"),
             Type::AnotherType(i) => i.name(),
+            Type::ParenthesisType(t) => t.name(),
         }
     }
     // TODO: remove it
@@ -239,6 +265,7 @@ impl Type {
             Type::Unknown(_) => MainType::Unknown,
             Type::Function(_) => MainType::Function,
             Type::AnotherType(t) => t.main_type(),
+            Type::ParenthesisType(t) => t.main_type(),
         }
     }
 }
@@ -252,8 +279,8 @@ pub struct TypeKind<T> {
 impl<T: Display + Debug> Display for TypeKind<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         match &self.name {
-            Some(name) => f.write_str(&format!("{}: ", name))?,
-            None => {}
+            Some(name) => f.write_str(&format!("({}: ", name))?,
+            None => f.write_str("(")?,
         };
         f.write_str(
             &self
@@ -262,7 +289,8 @@ impl<T: Display + Debug> Display for TypeKind<T> {
                 .map(ToString::to_string)
                 .collect::<Vec<_>>()
                 .join(" | "),
-        )
+        )?;
+        f.write_str(")")
     }
 }
 
@@ -400,17 +428,16 @@ pub fn parse_type_helper(token: Token, ctx: &Context) -> Result<Type, Error> {
             name: None,
             kinds: Spanned::new(VecType::one(Int::Value(i)), token.span),
         })),
-        Ast::Parenthesis(t) => parse_type_helper(*t, ctx),
+        Ast::Parenthesis(t) => {
+            parse_type_helper(*t, ctx).map(|ty| Type::ParenthesisType(Box::new(ty)))
+        }
         Ast::Ident(i) => match i.0.as_str() {
             "Int" => Ok(Type::Int(TypeKind::empty(span))),
             "Type" => Ok(Type::Type(OneTypeKind::from_kind(Spanned::new(
                 TypeType, token.span,
             )))),
             name => match ctx.find(name) {
-                Some(AllObject::Type(t)) => Ok(Type::AnotherType(Spanned::new(
-                    t.object.clone(),
-                    token.span,
-                ))),
+                Some(AllObject::Type(t)) => Ok(Type::AnotherType(t.object.clone())),
                 _ => Err(Error::Custom(
                     token.span,
                     format!("Type {} not found", name),

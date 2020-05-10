@@ -21,22 +21,6 @@ impl<'a> Context<'a> {
     }
 }
 
-pub fn context_from_types<'a>(types: Vec<Rc<Spanned<Type>>>) -> Box<Context<'a>> {
-    Box::new(Context {
-        objects: types
-            .into_iter()
-            .map(|t| {
-                let span = t.span;
-                AllObject::Type(Rc::new(Object {
-                    object: t,
-                    object_type: Rc::new(Spanned::new(TypeType, span)),
-                }))
-            })
-            .collect(),
-        parent: None,
-    })
-}
-
 pub fn type_check_objects<'a>(
     objects: &[AllObject],
     ctx: Option<&'a Context<'a>>,
@@ -62,28 +46,15 @@ pub fn type_check_objects<'a>(
 }
 
 pub fn type_check_function(function: &FunctionObject, top: &Context) -> Result<(), Error> {
-    let FunctionObject {
-        name,
-        args,
-        return_value,
-        body,
-    } = function;
-    // TODO: Remove copying
-    let cur_objects = args
-        .iter()
-        .map(|a| AllObject::Var((*a).clone()))
-        .collect::<Vec<_>>();
-    let ctx = Context {
-        objects: cur_objects,
-        parent: Some(top),
-    };
-    // TODO: Remove clone()
-    let res_type = type_check_expr(body.clone(), &ctx)?;
-    match res_type.is_part_of(return_value) {
+    let ctx = function.create_ctx(top);
+    let body = function.get_body();
+    let return_type = function.get_return_type();
+    let res_type = type_check_expr(body, &ctx)?;
+    match res_type.is_part_of(return_type) {
         true => Ok(()),
         false => Err(Error::Custom(
             res_type.span,
-            format!("Expected {} type, found {}", return_value, res_type),
+            format!("Expected {} type, found {}", return_type, res_type),
             "-here".to_owned(),
         )),
     }
@@ -116,13 +87,16 @@ fn type_check_expr(expr: Expr, ctx: &Context) -> Result<Rc<Spanned<Type>>, Error
                 new_span,
             )))
         }
-        Expr::CallFunction(f) => Ok(f.object_type.clone()),
+        Expr::CallFunction(f) => Ok(Rc::new(Spanned::new(
+            Type::AnotherType(Spanned::new(f.call(), f.object.span)),
+            f.span,
+        ))),
         Expr::Var(v) => Ok(Rc::new(Spanned::new(
             Type::AnotherType(Spanned::new(v.object_type.clone(), v.object.0.span)),
-            v.object.0.span,
+            v.span,
         ))),
         Expr::Type(t) => Ok(Rc::new(Spanned::new(
-            Type::AnotherType(Spanned::new(t.object.clone(), t.object.span)),
+            Type::AnotherType(t.object.clone()),
             t.object.span,
         ))),
     }

@@ -8,7 +8,7 @@ mod types;
 
 pub use error::peg_error_to_showed;
 pub use parser::parse;
-pub use type_check::{context_from_types, type_check_objects};
+pub use type_check::type_check_objects;
 
 use crate::error::Error;
 use crate::object::{parse_function, AllObject, Object};
@@ -35,7 +35,7 @@ pub fn parse_tokens<'a>(tokens: Vec<Spanned<TopLevelToken>>) -> Result<Context<'
                 Ok(t) => {
                     let span = t.span;
                     ctx.objects.push(AllObject::Type(Rc::new(Object {
-                        object: t,
+                        object: Spanned::new(t, span),
                         object_type: Rc::new(Spanned::new(TypeType, span)),
                     })))
                 }

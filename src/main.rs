@@ -1,7 +1,5 @@
 use clap::{App, Arg};
-use fsmcreator::{
-    context_from_types, parse, parse_tokens, peg_error_to_showed, type_check_objects,
-};
+use fsmcreator::{parse, parse_tokens, peg_error_to_showed, type_check_objects};
 use std::fs::File;
 use std::io::Read;
 
