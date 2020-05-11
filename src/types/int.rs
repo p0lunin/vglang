@@ -8,6 +8,7 @@ use itertools::Itertools;
 use std::cmp::{max, min};
 use std::fmt::{Display, Formatter};
 use std::ops::Add;
+use std::rc::Rc;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Int {
@@ -15,6 +16,18 @@ pub enum Int {
     Bound(OneRangeIntBound),
     KnownBound { low: i128, high: i128 },
     Slice(Slice),
+}
+
+impl Spanned<i128> {
+    pub fn get_type(&self) -> Rc<Spanned<Type>> {
+        Rc::new(Spanned::new(
+            Type::Int(TypeKind::from_kinds(Spanned::new(
+                VecType::one(Int::Value(self.val)),
+                self.span,
+            ))),
+            self.span,
+        ))
+    }
 }
 
 impl Int {

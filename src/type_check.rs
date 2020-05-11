@@ -34,9 +34,9 @@ pub fn type_check_objects<'a>(
         .map(|object| {
             match object {
                 AllObject::Function(f) => {
+                    ctx.objects.push(AllObject::Function(f.clone()));
                     type_check_function(&f.object, &ctx)?;
                     // TODO: remove clone
-                    ctx.objects.push(AllObject::Function(f.clone()));
                     Ok(())
                 }
                 _ => Ok(()),
@@ -62,7 +62,7 @@ pub fn type_check_function(function: &FunctionObject, top: &Context) -> Result<(
 
 fn type_check_expr(expr: Expr, ctx: &Context) -> Result<Rc<Spanned<Type>>, Error> {
     match expr {
-        Expr::Int(i) => Ok((i.object_type.clone())),
+        Expr::Int(i) => Ok((i.get_type())),
         Expr::Add(l, r) => {
             let left = type_check_expr(*l, ctx)?;
             let right = type_check_expr(*r, ctx)?;
@@ -99,5 +99,6 @@ fn type_check_expr(expr: Expr, ctx: &Context) -> Result<Rc<Spanned<Type>>, Error
             Type::AnotherType(t.object.clone()),
             t.object.span,
         ))),
+        Expr::CallFunctionDef(def) => Ok(ctx.find(def.name.as_str()).unwrap().get_type()),
     }
 }

@@ -23,6 +23,7 @@ pub enum Type {
     Unknown(OneTypeKind<Unknown>),
     ParenthesisType(Box<Type>),
     AnotherType(Spanned<Rc<Spanned<Type>>>),
+    Named(Spanned<String>, Rc<Spanned<Type>>),
 }
 
 impl Type {
@@ -41,6 +42,9 @@ impl Type {
             (l, Type::AnotherType(r)) => l.is_part_of(r),
             (Type::ParenthesisType(l), r) => l.is_part_of(r),
             (l, Type::ParenthesisType(r)) => l.is_part_of(r),
+            (Type::Named(_, l), Type::Named(_, r)) => l == r,
+            (Type::Named(_, l), r) => l.is_part_of(r),
+            (l, Type::Named(_, r)) => l.is_part_of(r),
             _ => false,
         }
     }
@@ -55,6 +59,7 @@ impl Display for Type {
             Type::Unknown(_) => f.write_str("Unknown"),
             Type::AnotherType(t) => Display::fmt(t, f),
             Type::ParenthesisType(t) => Display::fmt(t, f),
+            Type::Named(name, def) => f.write_str(&format!("{{{}: {}}}", name, def)),
         }
     }
 }
@@ -68,6 +73,7 @@ impl Type {
             Type::Function(t) => t.span(),
             Type::AnotherType(t) => t.span(),
             Type::ParenthesisType(t) => t.span(),
+            Type::Named(name, def) => name.span.extend(&def.span),
         }
     }
 
@@ -77,8 +83,9 @@ impl Type {
             Type::Type(t) => t.name = Some(name),
             Type::Unknown(t) => t.name = Some(name),
             Type::Function(t) => t.name = Some(name),
-            Type::AnotherType(t) => {}
-            Type::ParenthesisType(t) => {}
+            Type::AnotherType(t) => unreachable!(),
+            Type::ParenthesisType(t) => unreachable!(),
+            Type::Named(_, _) => unreachable!(),
         }
     }
 
@@ -88,10 +95,34 @@ impl Type {
             Type::Type(t) => t.name = None,
             Type::Unknown(t) => t.name = None,
             Type::Function(t) => t.name = None,
-            Type::AnotherType(t) => unimplemented!(),
-            Type::ParenthesisType(t) => unimplemented!(),
+            Type::AnotherType(t) => unreachable!(),
+            Type::ParenthesisType(t) => unreachable!(),
+            Type::Named(_, _) => unreachable!(),
         }
     }
+    /*
+    fn apply_op<F: Fn(T) -> Result<T, String>, T>(self, f: F) -> Result<Self, String> {
+        match self {
+            Type::Int(t) => f(t).map(Type::Int),
+            Type::Type(t) => f(t).map(Type::Type),
+            Type::Unknown(t) => t.add(value).map(Type::Unknown),
+            Type::Function(t) => t.add(value).map(Type::Function),
+            Type::AnotherType(t) => {
+                let mut inner = (***t).clone();
+                inner.remove_name();
+                inner.op_add(value)
+            }
+            Type::ParenthesisType(mut t) => {
+                t.remove_name();
+                t.op_add(value)
+            }
+            Type::Named(_, t) => {
+                let mut inner = (**t).clone();
+                inner.remove_name();
+                inner.op_add(value)
+            }
+        }
+    }*/
 
     pub fn op_add(self, value: Type) -> Result<Self, String> {
         match self {
@@ -107,6 +138,11 @@ impl Type {
             Type::ParenthesisType(mut t) => {
                 t.remove_name();
                 t.op_add(value)
+            }
+            Type::Named(_, t) => {
+                let mut inner = (**t).clone();
+                inner.remove_name();
+                inner.op_add(value)
             }
         }
     }
@@ -126,6 +162,11 @@ impl Type {
                 t.remove_name();
                 t.op_add(value.op_neg()?)
             }
+            Type::Named(_, t) => {
+                let mut inner = (**t).clone();
+                inner.remove_name();
+                inner.op_add(value.op_neg()?)
+            }
         }
     }
 
@@ -143,6 +184,11 @@ impl Type {
             Type::ParenthesisType(mut t) => {
                 t.remove_name();
                 t.op_and(value)
+            }
+            Type::Named(_, t) => {
+                let mut inner = (**t).clone();
+                inner.remove_name();
+                inner.op_and(value)
             }
         }
     }
@@ -162,6 +208,11 @@ impl Type {
                 t.remove_name();
                 t.op_or(value)
             }
+            Type::Named(_, t) => {
+                let mut inner = (**t).clone();
+                inner.remove_name();
+                inner.op_or(value)
+            }
         }
     }
 
@@ -179,6 +230,11 @@ impl Type {
             Type::ParenthesisType(mut t) => {
                 t.remove_name();
                 t.op_neg()
+            }
+            Type::Named(_, t) => {
+                let mut inner = (**t).clone();
+                inner.remove_name();
+                inner.op_neg()
             }
         }
     }
@@ -207,6 +263,19 @@ impl Spanned<Type> {
             }
             _ => vec![self.clone()],
         }
+    }
+    pub fn types_in_scope(self: &Rc<Spanned<Type>>) -> Vec<Rc<Spanned<Type>>> {
+        let mut types = vec![];
+        match &***self {
+            Type::Named(_, _) => types.push(self.clone()),
+            Type::Function(f) => {
+                let Function { get_value, return_value } = &*f.kind;
+                types.append(&mut get_value.types_in_scope());
+                types.append(&mut return_value.types_in_scope());
+            }
+            _ => {}
+        };
+        types
     }
 }
 
@@ -255,6 +324,7 @@ impl Type {
                 .unwrap_or("anonymous type"),
             Type::AnotherType(i) => i.name(),
             Type::ParenthesisType(t) => t.name(),
+            Type::Named(t, _) => t.as_str()
         }
     }
     // TODO: remove it
@@ -266,6 +336,7 @@ impl Type {
             Type::Function(_) => MainType::Function,
             Type::AnotherType(t) => t.main_type(),
             Type::ParenthesisType(t) => t.main_type(),
+            Type::Named(_, t) => t.main_type(),
         }
     }
 }
@@ -522,6 +593,12 @@ pub fn parse_type_helper(token: Token, ctx: &Context) -> Result<Type, Error> {
         Ast::Implication(l, r) => parse_type_helper(*l, ctx).and_then(|left| {
             parse_type_helper(*r, ctx).and_then(|right| left.op_implication(right))
         }),
+        Ast::Named(name, def) => {
+            Ok(Type::Named(
+                Spanned::new(name.0.clone(), name.span),
+                Rc::new(Spanned::new(parse_type_helper(*def, ctx)?, token.span)),
+            ))
+        }
         t => {
             dbg!(t);
             unimplemented!()

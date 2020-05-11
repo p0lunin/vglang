@@ -2,13 +2,16 @@ use crate::error::Error;
 use crate::parser::{Ast, FunctionDef, FunctionImpl, Token};
 use crate::spanned::{Span, Spanned};
 use crate::type_check::Context;
-use crate::types::{parse_type_helper, Int, Type, TypeKind, TypeType, VecType, OneTypeKind, Function};
+use crate::types::{
+    parse_type_helper, Function, Type, TypeType,
+};
 use std::fmt::{Debug, Display, Formatter};
 use std::rc::Rc;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum AllObject {
     Type(Rc<Object<Rc<Spanned<Type>>>>),
+    FunctionDefinition(Rc<FunctionDefinition>),
     Function(Rc<Object<FunctionObject>>),
     Var(Rc<Object<Var>>),
 }
@@ -19,6 +22,7 @@ impl Display for AllObject {
             AllObject::Type(t) => f.write_str(&format!("{}", t.object)),
             AllObject::Function(t) => f.write_str(&format!("{}", t.object)),
             AllObject::Var(v) => unimplemented!(),
+            AllObject::FunctionDefinition(f) => unimplemented!(),
         }
     }
 }
@@ -29,6 +33,7 @@ impl AllObject {
             AllObject::Type(t) => t.object.name(),
             AllObject::Function(f) => &f.object.name,
             AllObject::Var(v) => v.object.0.as_str(),
+            AllObject::FunctionDefinition(f) => f.name.as_str(),
         }
     }
     pub fn get_type(&self) -> Rc<Spanned<Type>> {
@@ -36,6 +41,7 @@ impl AllObject {
             AllObject::Type(t) => (*t.object).clone(),
             AllObject::Function(t) => t.object_type.clone(),
             AllObject::Var(t) => t.object_type.clone(),
+            AllObject::FunctionDefinition(f) => f.ftype.clone(),
         }
     }
     pub fn call(&self) -> Rc<Spanned<Type>> {
@@ -43,6 +49,7 @@ impl AllObject {
             AllObject::Type(t) => (*t.object).clone(),
             AllObject::Function(t) => t.call(),
             AllObject::Var(t) => t.object_type.clone(),
+            AllObject::FunctionDefinition(f) => f.ftype.clone(),
         }
     }
 }
@@ -63,6 +70,12 @@ impl Objectable for Rc<Spanned<Type>> {
 
 impl Objectable for TypeType {
     type Type = TypeType;
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct FunctionDefinition {
+    pub name: Spanned<String>,
+    pub ftype: Rc<Spanned<Type>>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -88,7 +101,7 @@ impl FunctionObject {
             None => match &*self.return_value {
                 AllObject::Function(f) => f.object.get_body(),
                 _ => unreachable!(),
-            }
+            },
         }
     }
 
@@ -104,13 +117,11 @@ impl FunctionObject {
         let mut args = vec![];
         match &self.arg {
             Some(arg) => args.push(AllObject::Var(arg.clone())),
-            None => {
-                match &*self.return_value {
-                    AllObject::Type(t) => {},
-                    AllObject::Function(f) => args.append(f.object.get_args().as_mut()),
-                    _ => unreachable!(),
-                }
-            }
+            None => match &*self.return_value {
+                AllObject::Type(t) => {}
+                AllObject::Function(f) => args.append(f.object.get_args().as_mut()),
+                _ => unreachable!(),
+            },
         };
         args
     }
@@ -126,7 +137,14 @@ impl Display for FunctionObject {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(f, "Function:\n")?;
         write!(f, "Name: {}\n", self.name)?;
-        write!(f, "Arg: {}\n", self.arg.as_ref().map(|var| var.object_type.to_string()).unwrap_or("None".to_owned()))?;
+        write!(
+            f,
+            "Arg: {}\n",
+            self.arg
+                .as_ref()
+                .map(|var| var.object_type.to_string())
+                .unwrap_or("None".to_owned())
+        )?;
         write!(f, "Return: \n{}", self.return_value)?;
         Ok(())
     }
@@ -138,16 +156,29 @@ impl Objectable for FunctionObject {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Expr {
-    Int(Object<IntObject>),
+    Int(Spanned<i128>),
     Add(Box<Expr>, Box<Expr>),
     Sub(Box<Expr>, Box<Expr>),
     CallFunction(Spanned<Rc<Object<FunctionObject>>>),
+    CallFunctionDef(Spanned<Rc<FunctionDefinition>>),
     Var(Spanned<Rc<Object<Var>>>),
     Type(Rc<Object<Rc<Spanned<Type>>>>),
 }
 
+impl Expr {
+    pub fn add(self, other: Expr) -> Self {
+        match (self, other) {
+            (Expr::Int(i), Expr::Int(n)) => {
+                Expr::Int(Spanned::new(*i + *n, i.span.extend(&n.span)))
+            }
+            (l, r) => Expr::Add(Box::new(l), Box::new(r)),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct Var(pub Spanned<String>);
+
 impl Objectable for Var {
     type Type = Type;
 }
@@ -171,7 +202,7 @@ pub fn parse_function(
     let func_type = Rc::new(Spanned::new(parse_type_helper(*def, ctx)?, def_span));
     let count_args = func_type.count_args();
     let FunctionImpl(impl_name, args, body) = fimpl;
-    let mut arg_types = func_type.args_types();
+    let arg_types = func_type.args_types();
     match args.len() == count_args as usize {
         false => Err(Error::Custom(
             impl_name.span,
@@ -179,7 +210,10 @@ pub fn parse_function(
             "-here".to_owned(),
         )),
         true => {
-            let arg_names = args.iter().map(|i| Spanned::new(i.0.clone(), i.span)).collect::<Vec<_>>();
+            let arg_names = args
+                .iter()
+                .map(|i| Spanned::new(i.0.clone(), i.span))
+                .collect::<Vec<_>>();
             let args = args
                 .into_iter()
                 .zip(arg_types.clone().into_iter())
@@ -192,11 +226,31 @@ pub fn parse_function(
                 })
                 .collect::<Vec<_>>();
             let ctx = Context {
-                objects: args.iter().map(|v| AllObject::Var(v.clone())).collect(),
+                objects: func_type.types_in_scope().into_iter().map(|t| {
+                    let span = t.span;
+                    AllObject::Type(Rc::new(Object {
+                        object: Spanned::new(t, span),
+                        object_type: Rc::new(Spanned::new(TypeType, span)),
+                    }))
+                }).collect(),
                 parent: Some(ctx),
             };
+            let mut ctx = Context {
+                objects: args.iter().map(|v| AllObject::Var(v.clone())).collect(),
+                parent: Some(&ctx),
+            };
+            ctx.objects.push(AllObject::FunctionDefinition(Rc::new(FunctionDefinition {
+                name: name.clone(),
+                ftype: func_type.clone(),
+            })));
             let expr = parse_expr(body.0, &ctx)?;
-            Ok(parse_function_helper(name, arg_names, func_type, impl_name.span, expr))
+            Ok(parse_function_helper(
+                name,
+                arg_names,
+                func_type,
+                impl_name.span,
+                expr,
+            ))
         }
     }
 }
@@ -204,13 +258,16 @@ pub fn parse_function(
 fn parse_function_helper(
     name: Spanned<String>,
     mut arg_names: Vec<Spanned<String>>,
-    mut func_type: Rc<Spanned<Type>>,
+    func_type: Rc<Spanned<Type>>,
     span: Span,
     body: Expr,
 ) -> AllObject {
     match &**func_type {
         Type::Function(t) => {
-            let Function { get_value, return_value } = t.kind.clone().inner();
+            let Function {
+                get_value,
+                return_value,
+            } = t.kind.clone().inner();
             AllObject::Function(Rc::new(Object {
                 object: Spanned::new(
                     FunctionObject {
@@ -219,7 +276,13 @@ fn parse_function_helper(
                             object: Spanned::new(Var(arg_names.remove(0)), span),
                             object_type: get_value,
                         })),
-                        return_value: Rc::new(parse_function_helper(name, arg_names, return_value, span, body)),
+                        return_value: Rc::new(parse_function_helper(
+                            name,
+                            arg_names,
+                            return_value,
+                            span,
+                            body,
+                        )),
                         body: None,
                     },
                     span,
@@ -227,47 +290,28 @@ fn parse_function_helper(
                 object_type: func_type,
             }))
         }
-        t => {
-            AllObject::Function(Rc::new(Object {
-                object: Spanned::new(
-                    FunctionObject {
-                        name,
-                        arg: None,
-                        return_value: Rc::new(AllObject::Type(Rc::new(Object {
-                            object: Spanned::new(func_type.clone(), span),
-                            object_type: Rc::new(Spanned::new(TypeType, span)),
-                        }))),
-                        body: Some(body),
-                    },
-                    span,
-                ),
-                object_type: func_type,
-            }))
-        }
+        t => AllObject::Function(Rc::new(Object {
+            object: Spanned::new(
+                FunctionObject {
+                    name,
+                    arg: None,
+                    return_value: Rc::new(AllObject::Type(Rc::new(Object {
+                        object: Spanned::new(func_type.clone(), span),
+                        object_type: Rc::new(Spanned::new(TypeType, span)),
+                    }))),
+                    body: Some(body),
+                },
+                span,
+            ),
+            object_type: func_type,
+        })),
     }
 }
 
 pub fn parse_expr(token: Token, ctx: &Context) -> Result<Expr, Error> {
     match token.ast {
-        Ast::Int(i) => Ok(Expr::Int(Object {
-            object: Spanned::new(
-                IntObject {
-                    data: Spanned::new(i, token.span),
-                },
-                token.span,
-            ),
-            object_type: Rc::new(Spanned::new(
-                Type::Int(TypeKind::from_kinds(Spanned::new(
-                    VecType::one(Int::Value(i)),
-                    token.span,
-                ))),
-                token.span,
-            )),
-        })),
-        Ast::Add(l, r) => Ok(Expr::Add(
-            Box::new(parse_expr(*l, ctx)?),
-            Box::new(parse_expr(*r, ctx)?),
-        )),
+        Ast::Int(i) => Ok(Expr::Int(Spanned::new(i, token.span))),
+        Ast::Add(l, r) => Ok(parse_expr(*l, ctx)?.add(parse_expr(*r, ctx)?)),
         Ast::Sub(l, r) => Ok(Expr::Sub(
             Box::new(parse_expr(*l, ctx)?),
             Box::new(parse_expr(*r, ctx)?),
@@ -288,6 +332,10 @@ pub fn parse_expr(token: Token, ctx: &Context) -> Result<Expr, Error> {
                     ),
                     object_type: t.object_type.clone(),
                 }))),
+                AllObject::FunctionDefinition(def) => Ok(Expr::CallFunctionDef(Spanned::new(
+                    def.clone(),
+                    token.span,
+                ))),
                 _ => unimplemented!(),
             },
             _ => Err(Error::Custom(
