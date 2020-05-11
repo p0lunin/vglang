@@ -48,6 +48,7 @@ pub enum Ast {
     Slice(Slice),
     Implication(Box<Token>, Box<Token>),
     Named(Spanned<Ident>, Box<Token>),
+    CallFunction(Box<Token>, Box<Token>),
 }
 
 #[derive(Debug, PartialEq)]
@@ -116,22 +117,22 @@ peg::parser! { grammar lang() for str {
         }
 
     pub rule type_definition(i: usize) -> Token
-        = logic(i)
+        = logic(i, <single(i)>)
 
     rule FunctionDef(i: usize) -> Spanned<TopLevelToken>
-        = start:position!() name:ident() _ ":" inli(i) ftype:logic(i) new_line() end:position!() {
+        = start:position!() name:ident() _ ":" inli(i) ftype:type_definition(i) new_line() end:position!() {
             Spanned::new(TopLevelToken::FunctionDef(FunctionDef(name, Box::new(ftype))), Span::new(start, end))
         }
 
     rule function_impl(i: usize) -> Spanned<TopLevelToken>
-        = start:position!() name:ident() __ args:(ident_space())*  _ "=" _ body:logic(i) end:position!() {
+        = start:position!() name:ident() __ args:(ident_space())*  _ "=" _ body:type_definition(i) end:position!() {
             Spanned::new(TopLevelToken::FunctionImpl(FunctionImpl(name, args, FunctionBody(body))), Span::new(start, end))
         }
 
     rule ident_space() -> Spanned<Ident>
         = i:ident() __ { i }
 
-    pub rule logic(i: usize) -> Token = precedence! {
+    rule logic(i: usize, single_rule: rule<Token>) -> Token = precedence! {
         x:(@) inli(i) "|" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Or(Box::new(x), Box::new(y))) }
         --
         x:(@) inli(i) "&" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::And(Box::new(x), Box::new(y))) }
@@ -143,10 +144,6 @@ peg::parser! { grammar lang() for str {
         x:(@) inli(i) "==" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Eq(Box::new(x), Box::new(y))) }
         x:(@) inli(i) "!=" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::NotEq(Box::new(x), Box::new(y))) }
         --
-        d:block(i, <logic(i)>) { d }
-        x:arithmetic(i) {x}
-    }
-    pub rule arithmetic(i: usize) -> Token = precedence! {
         x:(@) inli(i) "+" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Add(Box::new(x), Box::new(y))) }
         x:(@) inli(i) "-" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Sub(Box::new(x), Box::new(y))) }
         start:position!() inli(i) "-" inli(i) x:@ { Token::new(Span::new(start, x.span.end), Ast::Neg(Box::new(x))) }
@@ -158,19 +155,30 @@ peg::parser! { grammar lang() for str {
         --
         x:@ inli(i) "->" inli(i) y:(@) { Token::new(x.span.extend(&y.span), Ast::Implication(Box::new(x), Box::new(y)))}
         --
-        start:position!() "(" inli(i) v:logic(i) inli(i) ")" end:position!() {
+        start:position!() "(" inli(i) v:logic(i, <single_rule()>) inli(i) ")" end:position!() {
             Token::new(Span::new(start, end), Ast::Parenthesis(Box::new(v)))
         }
-        d:block(i, <logic(i)>) { d }
-        x:single(i) {x}
+        d:block(i, <logic(i, <single_rule()>)>) { d }
+        x:single_rule() {x}
     }
 
-    rule single(i: usize) -> Token
+    // to avoid left recursion
+    rule single_without_func(i: usize) -> Token
         = num() /
         s:position!() "val" e:position!() { Token::new(Span::new(s, e), Ast::Val) } /
         id:ident() { Token::new(id.span, Ast::Ident(id.inner())) } /
         s:position!() slice:slice() e:position!() { Token::new(Span::new(s, e), Ast::Slice(slice)) } /
-        s:position!() "{" _ id:ident() _ ":" _ ty:logic(i) "}" e:position!() { Token::new(Span::new(s, e), Ast::Named(id, Box::new(ty))) }
+        s:position!() "{" _ id:ident() _ ":" _ ty:type_definition(i) "}" e:position!() { Token::new(Span::new(s, e), Ast::Named(id, Box::new(ty))) }
+
+    rule single(i: usize) -> Token
+        = num() /
+        s:position!() left:logic(i, <single_without_func(i)>) " " right:logic(i, <single_without_func(i)>) e:position!() {
+            Token::new(Span::new(s, e), Ast::CallFunction(Box::new(left), Box::new(right)))
+        } /
+        s:position!() "val" e:position!() { Token::new(Span::new(s, e), Ast::Val) } /
+        id:ident() { Token::new(id.span, Ast::Ident(id.inner())) } /
+        s:position!() slice:slice() e:position!() { Token::new(Span::new(s, e), Ast::Slice(slice)) } /
+        s:position!() "{" _ id:ident() _ ":" _ ty:type_definition(i) "}" e:position!() { Token::new(Span::new(s, e), Ast::Named(id, Box::new(ty))) }
 
     rule slice() -> Slice
         = "[" _ first:spanned_int() _ "," _ second:spanned_int() _ ".." _ last:spanned_int() _ "]" {
@@ -221,7 +229,7 @@ peg::parser! { grammar lang() for str {
 }}
 
 use crate::spanned::{Span, Spanned};
-use lang::{arithmetic, num, parse_lang, type_declaration};
+use lang::{num, parse_lang, type_declaration};
 use std::fmt::{Debug, Formatter};
 use std::ops::Deref;
 
@@ -242,25 +250,6 @@ mod tests {
             Ok(Token::new(Span::new(0, 3), Ast::Double(1.2)))
         );
         assert_eq!(num("1"), Ok(Token::new(Span::new(0, 1), Ast::Int(1))));
-    }
-
-    #[test]
-    fn parse_expr() {
-        assert_eq!(
-            arithmetic("1.2+3", 0),
-            Ok(Token::new(
-                Span::new(0, 5),
-                Ast::Add(
-                    Box::new(Token::new(Span::new(0, 3), Ast::Double(1.2))),
-                    Box::new(Token::new(Span::new(4, 5), Ast::Int(3)))
-                )
-            ))
-        )
-    }
-
-    #[test]
-    fn parse_indentation() {
-        assert!(arithmetic("\n    1.2+3", 1).is_ok())
     }
 
     #[test]
