@@ -117,7 +117,7 @@ peg::parser! { grammar lang() for str {
         }
 
     pub rule type_definition(i: usize) -> Token
-        = logic(i, <single(i)>)
+        = logic(i)
 
     rule FunctionDef(i: usize) -> Spanned<TopLevelToken>
         = start:position!() name:ident() _ ":" inli(i) ftype:type_definition(i) new_line() end:position!() {
@@ -132,7 +132,7 @@ peg::parser! { grammar lang() for str {
     rule ident_space() -> Spanned<Ident>
         = i:ident() __ { i }
 
-    rule logic(i: usize, single_rule: rule<Token>) -> Token = precedence! {
+    rule logic(i: usize) -> Token = precedence! {
         x:(@) inli(i) "|" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Or(Box::new(x), Box::new(y))) }
         --
         x:(@) inli(i) "&" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::And(Box::new(x), Box::new(y))) }
@@ -155,11 +155,41 @@ peg::parser! { grammar lang() for str {
         --
         x:@ inli(i) "->" inli(i) y:(@) { Token::new(x.span.extend(&y.span), Ast::Implication(Box::new(x), Box::new(y)))}
         --
-        start:position!() "(" inli(i) v:logic(i, <single_rule()>) inli(i) ")" end:position!() {
+        start:position!() "(" inli(i) v:logic(i) inli(i) ")" end:position!() {
             Token::new(Span::new(start, end), Ast::Parenthesis(Box::new(v)))
         }
-        d:block(i, <logic(i, <single_rule()>)>) { d }
-        x:single_rule() {x}
+        d:block(i, <logic(i)>) { d }
+        x:single(i) { x }
+    }
+
+    rule logic2(i: usize) -> Token = precedence! {
+        x:(@) inli(i) "|" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Or(Box::new(x), Box::new(y))) }
+        --
+        x:(@) inli(i) "&" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::And(Box::new(x), Box::new(y))) }
+        --
+        x:(@) inli(i) ">" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Gr(Box::new(x), Box::new(y))) }
+        x:(@) inli(i) "<" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Le(Box::new(x), Box::new(y))) }
+        x:(@) inli(i) ">=" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::GrEq(Box::new(x), Box::new(y))) }
+        x:(@) inli(i) "<=" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::LeEq(Box::new(x), Box::new(y))) }
+        x:(@) inli(i) "==" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Eq(Box::new(x), Box::new(y))) }
+        x:(@) inli(i) "!=" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::NotEq(Box::new(x), Box::new(y))) }
+        --
+        x:(@) inli(i) "+" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Add(Box::new(x), Box::new(y))) }
+        x:(@) inli(i) "-" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Sub(Box::new(x), Box::new(y))) }
+        start:position!() inli(i) "-" inli(i) x:@ { Token::new(Span::new(start, x.span.end), Ast::Neg(Box::new(x))) }
+        --
+        x:(@) inli(i) "*" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Mul(Box::new(x), Box::new(y))) }
+        x:(@) inli(i) "/" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Div(Box::new(x), Box::new(y))) }
+        --
+        x:@ inli(i) "^" inli(i) y:(@) { Token::new(x.span.extend(&y.span), Ast::Pow(Box::new(x), Box::new(y))) }
+        --
+        x:@ inli(i) "->" inli(i) y:(@) { Token::new(x.span.extend(&y.span), Ast::Implication(Box::new(x), Box::new(y)))}
+        --
+        start:position!() "(" inli(i) v:logic(i) inli(i) ")" end:position!() {
+            Token::new(Span::new(start, end), Ast::Parenthesis(Box::new(v)))
+        }
+        d:block(i, <logic(i)>) { d }
+        x:single_without_func(i) { x }
     }
 
     // to avoid left recursion
@@ -172,7 +202,7 @@ peg::parser! { grammar lang() for str {
 
     rule single(i: usize) -> Token
         = num() /
-        s:position!() left:logic(i, <single_without_func(i)>) " " right:logic(i, <single_without_func(i)>) e:position!() {
+        s:position!() left:logic2(i) " " right:logic2(i) e:position!() {
             Token::new(Span::new(s, e), Ast::CallFunction(Box::new(left), Box::new(right)))
         } /
         s:position!() "val" e:position!() { Token::new(Span::new(s, e), Ast::Val) } /
