@@ -155,6 +155,8 @@ peg::parser! { grammar lang() for str {
         --
         x:@ inli(i) "->" inli(i) y:(@) { Token::new(x.span.extend(&y.span), Ast::Implication(Box::new(x), Box::new(y)))}
         --
+        x:(@) inli(i) "#" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::CallFunction(Box::new(x), Box::new(y))) }
+        --
         start:position!() "(" inli(i) v:logic(i) inli(i) ")" end:position!() {
             Token::new(Span::new(start, end), Ast::Parenthesis(Box::new(v)))
         }

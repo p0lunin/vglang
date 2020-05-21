@@ -1,10 +1,9 @@
 use crate::error::Error;
 use crate::parser::{Ast, FunctionDef, FunctionImpl, Token};
-use crate::spanned::{Span, Spanned};
+use crate::spanned::{AddSpan, Span, Spanned};
 use crate::type_check::Context;
-use crate::types::{
-    parse_type_helper, Function, Type, TypeType,
-};
+use crate::types::{parse_type_helper, Function, Type, TypeType};
+use either::Either;
 use std::fmt::{Debug, Display, Formatter};
 use std::rc::Rc;
 
@@ -13,6 +12,8 @@ pub enum AllObject {
     Type(Rc<Object<Rc<Spanned<Type>>>>),
     FunctionDefinition(Rc<FunctionDefinition>),
     Function(Rc<Object<FunctionObject>>),
+    CurriedFunction(Rc<CurriedFunction>),
+    Arg(Rc<Object<Arg>>),
     Var(Rc<Object<Var>>),
 }
 
@@ -20,9 +21,11 @@ impl Display for AllObject {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         match self {
             AllObject::Type(t) => f.write_str(&format!("{}", t.object)),
-            AllObject::Function(t) => f.write_str(&format!("{}", t.object)),
+            AllObject::Function(t) => f.write_str(&format!("{}", t)),
             AllObject::Var(v) => unimplemented!(),
             AllObject::FunctionDefinition(f) => unimplemented!(),
+            AllObject::CurriedFunction(_) => unimplemented!(),
+            AllObject::Arg(_) => unimplemented!(),
         }
     }
 }
@@ -30,46 +33,70 @@ impl Display for AllObject {
 impl AllObject {
     pub fn name(&self) -> &str {
         match self {
-            AllObject::Type(t) => t.object.name(),
-            AllObject::Function(f) => &f.object.name,
-            AllObject::Var(v) => v.object.0.as_str(),
-            AllObject::FunctionDefinition(f) => f.name.as_str(),
-        }
-    }
-    pub fn get_type(&self) -> Rc<Spanned<Type>> {
-        match self {
-            AllObject::Type(t) => (*t.object).clone(),
-            AllObject::Function(t) => t.object_type.clone(),
-            AllObject::Var(t) => t.object_type.clone(),
-            AllObject::FunctionDefinition(f) => f.ftype.clone(),
+            AllObject::Type(t) => &t.name,
+            AllObject::Function(t) => &t.name,
+            AllObject::Var(t) => &t.name,
+            AllObject::FunctionDefinition(t) => &t.name,
+            AllObject::CurriedFunction(f) => &f.orig.name(),
+            AllObject::Arg(a) => &a.name,
         }
     }
     pub fn call(&self) -> Rc<Spanned<Type>> {
         match self {
             AllObject::Type(t) => (*t.object).clone(),
-            AllObject::Function(t) => t.call(),
-            AllObject::Var(t) => t.object_type.clone(),
+            AllObject::Function(t) => t.object.ftype.clone(),
+            AllObject::Var(t) => t.object.get_type(),
             AllObject::FunctionDefinition(f) => f.ftype.clone(),
+            AllObject::CurriedFunction(f) => f.ftype.clone(),
+            AllObject::Arg(a) => a.object.atype.clone(),
+        }
+    }
+    pub fn call_with_arg_expr(&self, arg: Expr, span: Span) -> Result<AllObject, Error> {
+        match self {
+            AllObject::Function(f) => Ok(AllObject::CurriedFunction(Rc::new(CurriedFunction {
+                ftype: f.object.ftype.try_curry().ok_or(Error::Span(span))?.clone(),
+                scope: vec![arg],
+                orig: Callable::Func(f.clone()),
+            }))),
+            AllObject::Type(_) => Err(Error::Span(span)),
+            AllObject::FunctionDefinition(def) => {
+                Ok(AllObject::CurriedFunction(Rc::new(CurriedFunction {
+                    ftype: def.ftype.try_curry().ok_or(Error::Span(span))?.clone(),
+                    scope: vec![arg],
+                    orig: Callable::FuncDef(def.clone()),
+                })))
+            }
+            AllObject::CurriedFunction(f) => {
+                let mut scope = f.scope.clone();
+                scope.push(arg);
+                let new_type = f.ftype.try_curry().ok_or(Error::Span(span))?;
+                Ok(AllObject::CurriedFunction(Rc::new(CurriedFunction {
+                    ftype: new_type,
+                    scope,
+                    orig: f.orig.clone(),
+                })))
+            }
+            AllObject::Var(v) => v.object.data.call_with_arg_expr(arg, span),
+            AllObject::Arg(a) => Ok(AllObject::CurriedFunction(Rc::new(CurriedFunction {
+                ftype: a.object.atype.try_curry().ok_or(Error::Span(span))?,
+                scope: vec![arg],
+                orig: Callable::Arg(a.clone()),
+            }))),
         }
     }
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct Object<T: Objectable> {
+pub struct Object<T> {
+    pub name: Spanned<String>,
     pub object: Spanned<T>,
-    pub object_type: Rc<Spanned<T::Type>>,
 }
 
-pub trait Objectable {
-    type Type;
-}
-
-impl Objectable for Rc<Spanned<Type>> {
-    type Type = TypeType;
-}
-
-impl Objectable for TypeType {
-    type Type = TypeType;
+#[derive(Debug, PartialEq, Clone)]
+pub struct CurriedFunction {
+    pub ftype: Rc<Spanned<Type>>,
+    pub scope: Vec<Expr>,
+    pub orig: Callable,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -79,30 +106,39 @@ pub struct FunctionDefinition {
 }
 
 #[derive(Debug, PartialEq, Clone)]
+pub enum Callable {
+    Func(Rc<Object<FunctionObject>>),
+    FuncDef(Rc<FunctionDefinition>),
+    Arg(Rc<Object<Arg>>),
+}
+
+impl Callable {
+    pub fn name(&self) -> &Spanned<String> {
+        match self {
+            Callable::Func(f) => &f.name,
+            Callable::FuncDef(def) => &def.name,
+            Callable::Arg(a) => &a.name,
+        }
+    }
+    pub fn ftype(&self) -> Rc<Spanned<Type>> {
+        match self {
+            Callable::Func(f) => f.object.ftype.clone(),
+            Callable::FuncDef(def) => def.ftype.clone(),
+            Callable::Arg(a) => a.object.atype.clone(),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub struct FunctionObject {
-    pub name: Spanned<String>,
-    pub arg: Option<Rc<Object<Var>>>,
-    pub return_value: Rc<AllObject>,
-    pub body: Option<Expr>,
+    pub args: Vec<Rc<Object<Arg>>>,
+    pub ftype: Rc<Spanned<Type>>,
+    pub body: Rc<Expr>,
 }
 
 impl FunctionObject {
     pub fn get_return_type(&self) -> &Type {
-        match &*self.return_value {
-            AllObject::Type(t) => &t.object,
-            AllObject::Function(f) => f.object.get_return_type(),
-            _ => unreachable!(),
-        }
-    }
-
-    pub fn get_body(&self) -> Expr {
-        match &self.body {
-            Some(expr) => expr.clone(),
-            None => match &*self.return_value {
-                AllObject::Function(f) => f.object.get_body(),
-                _ => unreachable!(),
-            },
-        }
+        self.ftype.get_return_value()
     }
 
     pub fn create_ctx<'a>(&self, top: &'a Context) -> Context<'a> {
@@ -114,44 +150,20 @@ impl FunctionObject {
     }
 
     fn get_args(&self) -> Vec<AllObject> {
-        let mut args = vec![];
-        match &self.arg {
-            Some(arg) => args.push(AllObject::Var(arg.clone())),
-            None => match &*self.return_value {
-                AllObject::Type(t) => {}
-                AllObject::Function(f) => args.append(f.object.get_args().as_mut()),
-                _ => unreachable!(),
-            },
-        };
-        args
+        self.args
+            .iter()
+            .map(|arg| AllObject::Arg(arg.clone()))
+            .collect()
     }
 }
 
-impl Object<FunctionObject> {
-    pub fn call(&self) -> Rc<Spanned<Type>> {
-        self.object_type.clone()
-    }
-}
-
-impl Display for FunctionObject {
+impl Display for Object<FunctionObject> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(f, "Function:\n")?;
         write!(f, "Name: {}\n", self.name)?;
-        write!(
-            f,
-            "Arg: {}\n",
-            self.arg
-                .as_ref()
-                .map(|var| var.object_type.to_string())
-                .unwrap_or("None".to_owned())
-        )?;
-        write!(f, "Return: \n{}", self.return_value)?;
+        write!(f, "Type: {}\n", self.object.ftype)?;
         Ok(())
     }
-}
-
-impl Objectable for FunctionObject {
-    type Type = Type;
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -159,10 +171,7 @@ pub enum Expr {
     Int(Spanned<i128>),
     Add(Box<Expr>, Box<Expr>),
     Sub(Box<Expr>, Box<Expr>),
-    CallFunction(Spanned<Rc<Object<FunctionObject>>>),
-    CallFunctionDef(Spanned<Rc<FunctionDefinition>>),
-    Var(Spanned<Rc<Object<Var>>>),
-    Type(Rc<Object<Rc<Spanned<Type>>>>),
+    Object(Spanned<AllObject>),
 }
 
 impl Expr {
@@ -177,18 +186,27 @@ impl Expr {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct Var(pub Spanned<String>);
+pub struct Var {
+    pub data: AllObject,
+}
 
-impl Objectable for Var {
-    type Type = Type;
+#[derive(Debug, PartialEq, Clone)]
+pub struct Arg {
+    pub atype: Rc<Spanned<Type>>,
+}
+
+impl Var {
+    pub fn new(data: AllObject) -> Self {
+        Self { data }
+    }
+    pub fn get_type(&self) -> Rc<Spanned<Type>> {
+        self.data.call()
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct IntObject {
     pub data: Spanned<i128>,
-}
-impl Objectable for IntObject {
-    type Type = Type;
 }
 
 pub fn parse_function(
@@ -210,101 +228,55 @@ pub fn parse_function(
             "-here".to_owned(),
         )),
         true => {
-            let arg_names = args
-                .iter()
-                .map(|i| Spanned::new(i.0.clone(), i.span))
-                .collect::<Vec<_>>();
             let args = args
                 .into_iter()
                 .zip(arg_types.clone().into_iter())
                 .map(|(v, t)| {
                     let span = v.span;
                     Rc::new(Object {
-                        object: Spanned::new(Var(v.map(|i| i.0)), span),
-                        object_type: t,
+                        name: v.map(|i| i.0),
+                        object: Spanned::new(Arg { atype: t }, span),
                     })
                 })
                 .collect::<Vec<_>>();
             let ctx = Context {
-                objects: func_type.types_in_scope().into_iter().map(|t| {
-                    let span = t.span;
-                    AllObject::Type(Rc::new(Object {
-                        object: Spanned::new(t, span),
-                        object_type: Rc::new(Spanned::new(TypeType, span)),
-                    }))
-                }).collect(),
+                objects: func_type
+                    .types_in_scope()
+                    .into_iter()
+                    .map(|(name, ty)| {
+                        let span = ty.span;
+                        AllObject::Type(Rc::new(Object {
+                            name,
+                            object: Spanned::new(ty, span),
+                        }))
+                    })
+                    .collect(),
                 parent: Some(ctx),
             };
             let mut ctx = Context {
-                objects: args.iter().map(|v| AllObject::Var(v.clone())).collect(),
+                objects: args.iter().map(|v| AllObject::Arg(v.clone())).collect(),
                 parent: Some(&ctx),
             };
-            ctx.objects.push(AllObject::FunctionDefinition(Rc::new(FunctionDefinition {
-                name: name.clone(),
-                ftype: func_type.clone(),
-            })));
+            ctx.objects
+                .push(AllObject::FunctionDefinition(Rc::new(FunctionDefinition {
+                    name: name.clone(),
+                    ftype: func_type.clone(),
+                })));
             let expr = parse_expr(body.0, &ctx)?;
-            Ok(parse_function_helper(
-                name,
-                arg_names,
-                func_type,
-                impl_name.span,
-                expr,
-            ))
-        }
-    }
-}
 
-fn parse_function_helper(
-    name: Spanned<String>,
-    mut arg_names: Vec<Spanned<String>>,
-    func_type: Rc<Spanned<Type>>,
-    span: Span,
-    body: Expr,
-) -> AllObject {
-    match &**func_type {
-        Type::Function(t) => {
-            let Function {
-                get_value,
-                return_value,
-            } = t.kind.clone().inner();
-            AllObject::Function(Rc::new(Object {
+            let span = name.span;
+            Ok(AllObject::Function(Rc::new(Object {
+                name,
                 object: Spanned::new(
                     FunctionObject {
-                        name: name.clone(),
-                        arg: Some(Rc::new(Object {
-                            object: Spanned::new(Var(arg_names.remove(0)), span),
-                            object_type: get_value,
-                        })),
-                        return_value: Rc::new(parse_function_helper(
-                            name,
-                            arg_names,
-                            return_value,
-                            span,
-                            body,
-                        )),
-                        body: None,
+                        args,
+                        ftype: func_type,
+                        body: Rc::new(expr),
                     },
                     span,
                 ),
-                object_type: func_type,
-            }))
+            })))
         }
-        t => AllObject::Function(Rc::new(Object {
-            object: Spanned::new(
-                FunctionObject {
-                    name,
-                    arg: None,
-                    return_value: Rc::new(AllObject::Type(Rc::new(Object {
-                        object: Spanned::new(func_type.clone(), span),
-                        object_type: Rc::new(Spanned::new(TypeType, span)),
-                    }))),
-                    body: Some(body),
-                },
-                span,
-            ),
-            object_type: func_type,
-        })),
     }
 }
 
@@ -317,33 +289,24 @@ pub fn parse_expr(token: Token, ctx: &Context) -> Result<Expr, Error> {
             Box::new(parse_expr(*r, ctx)?),
         )),
         Ast::Ident(i) => match ctx.find(&i.0) {
-            Some(o) => match o {
-                AllObject::Function(f) => {
-                    Ok(Expr::CallFunction(Spanned::new(f.clone(), token.span)))
-                }
-                AllObject::Var(v) => Ok(Expr::Var(Spanned::new(v.clone(), token.span))),
-                AllObject::Type(t) => Ok(Expr::Type(Rc::new(Object {
-                    object: Spanned::new(
-                        Rc::new(Spanned::new(
-                            Type::AnotherType(t.object.clone()),
-                            token.span,
-                        )),
-                        token.span,
-                    ),
-                    object_type: t.object_type.clone(),
-                }))),
-                AllObject::FunctionDefinition(def) => Ok(Expr::CallFunctionDef(Spanned::new(
-                    def.clone(),
-                    token.span,
-                ))),
-                _ => unimplemented!(),
-            },
+            Some(o) => Ok(Expr::Object(o.clone().add_span(token.span))),
             _ => Err(Error::Custom(
                 token.span,
                 format!("{} not found", i.0),
                 "-here".to_owned(),
             )),
         },
+        Ast::CallFunction(func, arg) => {
+            let left_expr = parse_expr(*func, ctx)?;
+            let arg_expr = parse_expr(*arg, ctx)?;
+            match left_expr {
+                Expr::Object(o) => Ok(Expr::Object(
+                    o.call_with_arg_expr(arg_expr, token.span)?
+                        .add_span(token.span),
+                )),
+                _ => Err(Error::Span(token.span)),
+            }
+        }
         _ => unimplemented!(),
     }
 }

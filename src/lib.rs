@@ -31,16 +31,19 @@ pub fn parse_tokens<'a>(tokens: Vec<Spanned<TopLevelToken>>) -> Result<Context<'
     tokens.into_iter().for_each(|token| {
         let span = token.span;
         match token.inner() {
-            TopLevelToken::Type(t) => match types::parse_type(Spanned::new(t, span), &ctx) {
-                Ok(t) => {
-                    let span = t.span;
-                    ctx.objects.push(AllObject::Type(Rc::new(Object {
-                        object: Spanned::new(t, span),
-                        object_type: Rc::new(Spanned::new(TypeType, span)),
-                    })))
+            TopLevelToken::Type(ty) => {
+                let name = ty.0.clone().map(|i| i.0);
+                match types::parse_type(Spanned::new(ty, span), &ctx) {
+                    Ok(t) => {
+                        let span = t.span;
+                        ctx.objects.push(AllObject::Type(Rc::new(Object {
+                            name,
+                            object: Spanned::new(t, span),
+                        })))
+                    }
+                    Err(err) => errors.push(err),
                 }
-                Err(err) => errors.push(err),
-            },
+            }
             TopLevelToken::NewLine | TopLevelToken::Comment => {}
             TopLevelToken::FunctionDef(f) => function_defs.push(f),
             TopLevelToken::FunctionImpl(i) => function_impls.push_front(i),

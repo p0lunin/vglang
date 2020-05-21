@@ -47,7 +47,7 @@ pub fn type_check_objects<'a>(
 
 pub fn type_check_function(function: &FunctionObject, top: &Context) -> Result<(), Error> {
     let ctx = function.create_ctx(top);
-    let body = function.get_body();
+    let body = function.body.as_ref();
     let return_type = function.get_return_type();
     let res_type = type_check_expr(body, &ctx)?;
     match res_type.is_part_of(return_type) {
@@ -60,12 +60,12 @@ pub fn type_check_function(function: &FunctionObject, top: &Context) -> Result<(
     }
 }
 
-fn type_check_expr(expr: Expr, ctx: &Context) -> Result<Rc<Spanned<Type>>, Error> {
+fn type_check_expr(expr: &Expr, ctx: &Context) -> Result<Rc<Spanned<Type>>, Error> {
     match expr {
         Expr::Int(i) => Ok((i.get_type())),
         Expr::Add(l, r) => {
-            let left = type_check_expr(*l, ctx)?;
-            let right = type_check_expr(*r, ctx)?;
+            let left = type_check_expr(l.as_ref(), ctx)?;
+            let right = type_check_expr(r.as_ref(), ctx)?;
             let new_span = left.span.extend(&right.span);
             Ok(Rc::new(Spanned::new(
                 (**left)
@@ -76,8 +76,8 @@ fn type_check_expr(expr: Expr, ctx: &Context) -> Result<Rc<Spanned<Type>>, Error
             )))
         }
         Expr::Sub(l, r) => {
-            let left = type_check_expr(*l, ctx)?;
-            let right = type_check_expr(*r, ctx)?;
+            let left = type_check_expr(l.as_ref(), ctx)?;
+            let right = type_check_expr(r.as_ref(), ctx)?;
             let new_span = left.span.extend(&right.span);
             Ok(Rc::new(Spanned::new(
                 (**left)
@@ -87,18 +87,9 @@ fn type_check_expr(expr: Expr, ctx: &Context) -> Result<Rc<Spanned<Type>>, Error
                 new_span,
             )))
         }
-        Expr::CallFunction(f) => Ok(Rc::new(Spanned::new(
-            Type::AnotherType(Spanned::new(f.call(), f.object.span)),
-            f.span,
+        Expr::Object(o) => Ok(Rc::new(Spanned::new(
+            Type::AnotherType(Spanned::new(o.call(), o.span)),
+            o.span,
         ))),
-        Expr::Var(v) => Ok(Rc::new(Spanned::new(
-            Type::AnotherType(Spanned::new(v.object_type.clone(), v.object.0.span)),
-            v.span,
-        ))),
-        Expr::Type(t) => Ok(Rc::new(Spanned::new(
-            Type::AnotherType(t.object.clone()),
-            t.object.span,
-        ))),
-        Expr::CallFunctionDef(def) => Ok(ctx.find(def.name.as_str()).unwrap().get_type()),
     }
 }

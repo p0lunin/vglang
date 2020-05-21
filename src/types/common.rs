@@ -30,9 +30,10 @@ impl Type {
     pub fn is_part_of(&self, other: &Type) -> bool {
         match (self, other) {
             (Type::Function(l), Type::Function(r)) => l.kind.is_part_of(&r.kind),
-            (Type::Int(l), Type::Int(r)) => match l.kinds.is_empty() {
-                true => false,
-                false => l
+            (Type::Int(l), Type::Int(r)) => match (l.kinds.is_empty(), r.kinds.is_empty()) {
+                (false, true) => true,
+                (true, false) => false,
+                _ => l
                     .kinds
                     .iter()
                     .all(|l| r.kinds.iter().any(|r| l.is_part_of(r))),
@@ -46,6 +47,36 @@ impl Type {
             (Type::Named(_, l), r) => l.is_part_of(r),
             (l, Type::Named(_, r)) => l.is_part_of(r),
             _ => false,
+        }
+    }
+
+    pub fn try_curry(&self) -> Option<Rc<Spanned<Type>>> {
+        match self {
+            Type::Function(f) => Some(f.kind.return_value.clone()),
+            Type::ParenthesisType(t) => t.try_curry(),
+            Type::AnotherType(t) => t.try_curry(),
+            Type::Named(_, t) => t.try_curry(),
+            _ => None,
+        }
+    }
+
+    pub fn try_curry_with_arg(&self) -> Option<(Rc<Spanned<Type>>, Rc<Spanned<Type>>)> {
+        match self {
+            Type::Function(f) => Some((f.kind.get_value.clone(), f.kind.return_value.clone())),
+            Type::ParenthesisType(t) => t.try_curry_with_arg(),
+            Type::AnotherType(t) => t.try_curry_with_arg(),
+            Type::Named(_, t) => t.try_curry_with_arg(),
+            _ => None,
+        }
+    }
+
+    pub fn get_return_value(&self) -> &Type {
+        match self {
+            Type::Function(f) => f.kind.return_value.get_return_value(),
+            Type::ParenthesisType(t) => &t,
+            Type::AnotherType(t) => &t,
+            Type::Named(_, t) => t.get_return_value(),
+            t => t,
         }
     }
 }
@@ -125,6 +156,7 @@ impl Type {
     }*/
 
     pub fn op_add(self, value: Type) -> Result<Self, String> {
+        let value = value.get_inner();
         match self {
             Type::Int(t) => t.add(value).map(Type::Int),
             Type::Type(t) => t.add(value).map(Type::Type),
@@ -148,6 +180,7 @@ impl Type {
     }
 
     pub fn op_sub(self, value: Type) -> Result<Self, String> {
+        let value = value.get_inner();
         match self {
             Type::Int(t) => t.add(value.op_neg()?).map(Type::Int),
             Type::Type(t) => t.add(value.op_neg()?).map(Type::Type),
@@ -171,6 +204,7 @@ impl Type {
     }
 
     pub fn op_and(self, value: Type) -> Result<Self, String> {
+        let value = value.get_inner();
         match self {
             Type::Int(t) => t.and(value).map(Type::Int),
             Type::Type(t) => t.and(value).map(Type::Type),
@@ -194,6 +228,7 @@ impl Type {
     }
 
     pub fn op_or(self, value: Type) -> Result<Self, String> {
+        let value = value.get_inner();
         match self {
             Type::Int(t) => t.or(value).map(Type::Int),
             Type::Type(t) => t.or(value).map(Type::Type),
@@ -243,6 +278,15 @@ impl Type {
         Ok(self.implication(value))
     }
 
+    fn get_inner(&self) -> Type {
+        match self {
+            Type::AnotherType(t) => t.get_inner(),
+            Type::Named(_, n) => n.get_inner(),
+            Type::ParenthesisType(t) => t.get_inner(),
+            t => t.clone(),
+        }
+    }
+
     pub fn count_args(&self) -> u8 {
         match self {
             Type::Function(t) => 1 + t.kind.return_value.count_args(),
@@ -264,12 +308,15 @@ impl Spanned<Type> {
             _ => vec![self.clone()],
         }
     }
-    pub fn types_in_scope(self: &Rc<Spanned<Type>>) -> Vec<Rc<Spanned<Type>>> {
+    pub fn types_in_scope(self: &Rc<Spanned<Type>>) -> Vec<(Spanned<String>, Rc<Spanned<Type>>)> {
         let mut types = vec![];
         match &***self {
-            Type::Named(_, _) => types.push(self.clone()),
+            Type::Named(name, _) => types.push((name.clone(), self.clone())),
             Type::Function(f) => {
-                let Function { get_value, return_value } = &*f.kind;
+                let Function {
+                    get_value,
+                    return_value,
+                } = &*f.kind;
                 types.append(&mut get_value.types_in_scope());
                 types.append(&mut return_value.types_in_scope());
             }
@@ -324,7 +371,7 @@ impl Type {
                 .unwrap_or("anonymous type"),
             Type::AnotherType(i) => i.name(),
             Type::ParenthesisType(t) => t.name(),
-            Type::Named(t, _) => t.as_str()
+            Type::Named(t, _) => t.as_str(),
         }
     }
     // TODO: remove it
@@ -353,14 +400,19 @@ impl<T: Display + Debug> Display for TypeKind<T> {
             Some(name) => f.write_str(&format!("({}: ", name))?,
             None => f.write_str("(")?,
         };
-        f.write_str(
-            &self
-                .kinds
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join(" | "),
-        )?;
+        match self.kinds.is_empty() {
+            true => f.write_str("Int")?,
+            false => {
+                f.write_str(
+                    &self
+                        .kinds
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(" | "),
+                )?;
+            }
+        }
         f.write_str(")")
     }
 }
@@ -593,12 +645,10 @@ pub fn parse_type_helper(token: Token, ctx: &Context) -> Result<Type, Error> {
         Ast::Implication(l, r) => parse_type_helper(*l, ctx).and_then(|left| {
             parse_type_helper(*r, ctx).and_then(|right| left.op_implication(right))
         }),
-        Ast::Named(name, def) => {
-            Ok(Type::Named(
-                Spanned::new(name.0.clone(), name.span),
-                Rc::new(Spanned::new(parse_type_helper(*def, ctx)?, token.span)),
-            ))
-        }
+        Ast::Named(name, def) => Ok(Type::Named(
+            Spanned::new(name.0.clone(), name.span),
+            Rc::new(Spanned::new(parse_type_helper(*def, ctx)?, token.span)),
+        )),
         t => {
             dbg!(t);
             unimplemented!()
