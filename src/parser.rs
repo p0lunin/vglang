@@ -123,9 +123,14 @@ peg::parser! { grammar lang() for str {
         = type_declaration() / new_line() / comment() / FunctionDef(1) / function_impl(1) / enum_decl()
 
     rule comment() -> Spanned<TopLevelToken>
-        = start:position!() "//" (all_except_new_line())* (new_line() / ![_]) end:position!() {
+        = start:position!() "/*" (all_except_end_comment())* [_] "*/" end:position!() {
+            Spanned::new(TopLevelToken::Comment, Span::new(start, end))
+        } /
+        start:position!() "//" (all_except_new_line())* (new_line() / ![_]) end:position!() {
             Spanned::new(TopLevelToken::Comment, Span::new(start, end))
         }
+
+    rule all_except_end_comment() = [_] !"*/"
 
     rule all_except_new_line() = [_] !"\n"
 
