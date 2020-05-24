@@ -31,16 +31,13 @@ pub fn type_check_objects<'a>(
     };
     objects
         .iter()
-        .map(|object| {
-            match object {
-                AllObject::Function(f) => {
-                    ctx.objects.push(AllObject::Function(f.clone()));
-                    type_check_function(&f.object, &ctx)?;
-                    // TODO: remove clone
-                    Ok(())
-                }
-                _ => Ok(()),
+        .map(|object| match object {
+            AllObject::Function(f) => {
+                ctx.objects.push(AllObject::Function(f.clone()));
+                type_check_function(&f.object, &ctx)?;
+                Ok(())
             }
+            _ => Ok(()),
         })
         .collect()
 }
@@ -60,33 +57,43 @@ pub fn type_check_function(function: &FunctionObject, top: &Context) -> Result<(
     }
 }
 
+macro_rules! binary_op {
+    ($l:tt, $r:tt, $ctx:tt, $op:tt) => {{
+        let left = type_check_expr($l.as_ref(), $ctx)?;
+        let right = type_check_expr($r.as_ref(), $ctx)?;
+        let new_span = left.span.extend(&right.span);
+        Ok(Rc::new(Spanned::new(
+            (**left)
+                .clone()
+                .$op((**right).clone())
+                .spanned_err(new_span)?,
+            new_span,
+        )))
+    }};
+}
+
 pub fn type_check_expr(expr: &Expr, ctx: &Context) -> Result<Rc<Spanned<Type>>, Error> {
     match expr {
         Expr::Int(i) => Ok((i.get_type())),
-        Expr::Add(l, r) => {
-            let left = type_check_expr(l.as_ref(), ctx)?;
-            let right = type_check_expr(r.as_ref(), ctx)?;
-            let new_span = left.span.extend(&right.span);
-            Ok(Rc::new(Spanned::new(
-                (**left)
-                    .clone()
-                    .add((**right).clone())
-                    .spanned_err(new_span)?,
-                new_span,
-            )))
-        }
-        Expr::Sub(l, r) => {
-            let left = type_check_expr(l.as_ref(), ctx)?;
-            let right = type_check_expr(r.as_ref(), ctx)?;
-            let new_span = left.span.extend(&right.span);
-            Ok(Rc::new(Spanned::new(
-                (**left)
-                    .clone()
-                    .sub((**right).clone())
-                    .spanned_err(new_span)?,
-                new_span,
-            )))
-        }
+        Expr::Add(l, r) => binary_op!(l, r, ctx, add),
+        Expr::Sub(l, r) => binary_op!(l, r, ctx, sub),
         Expr::Object(o) => o.type_check_self(ctx),
+        Expr::Mul(l, r) => binary_op!(l, r, ctx, mul),
+        Expr::Div(l, r) => binary_op!(l, r, ctx, div),
+        Expr::Pow(l, r) => binary_op!(l, r, ctx, pow),
+        Expr::And(_, _) => unimplemented!(),
+        Expr::Or(_, _) => unimplemented!(),
+        Expr::Gr(_, _) => unimplemented!(),
+        Expr::Eq(_, _) => unimplemented!(),
+        Expr::NotEq(_, _) => unimplemented!(),
+        Expr::GrOrEq(_, _) => unimplemented!(),
+        Expr::Le(_, _) => unimplemented!(),
+        Expr::LeOrEq(_, _) => unimplemented!(),
+        Expr::Neg(e) => type_check_expr(&e, ctx).and_then(|ty| {
+            Ok(Rc::new(Spanned::new(
+                (**ty).clone().neg().spanned_err(e.span())?,
+                e.span(),
+            )))
+        }),
     }
 }

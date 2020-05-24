@@ -43,4 +43,20 @@ impl TypeOperable<Function> for OneTypeKind<Function> {
     fn or(self, right: Type) -> Result<Self, String> {
         Err("| is not allowed for `Function` value".to_owned())
     }
+
+    fn mul(self, right: Type) -> Result<Self, String> {
+        Err("* is not allowed for `Function` value".to_owned())
+    }
+
+    fn sub(self, right: Type) -> Result<Self, String> {
+        Err("- is not allowed for `Function` value".to_owned())
+    }
+
+    fn div(self, right: Type) -> Result<Self, String> {
+        Err("/ is not allowed for `Function` value".to_owned())
+    }
+
+    fn pow(self, right: Type) -> Result<Self, String> {
+        Err("^ is not allowed for `Function` value".to_owned())
+    }
 }

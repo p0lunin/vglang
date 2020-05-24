@@ -143,6 +143,66 @@ impl TypeOperable<Int> for TypeKind<Int> {
             )),
         }
     }
+
+    fn mul(self, right: Type) -> Result<Self, String> {
+        let TypeKind { name, kinds } = self;
+        let Spanned { val, span } = kinds;
+        let kinds = val
+            .inner()
+            .into_iter()
+            .map(|t| t.mul(right.clone()))
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .flatten()
+            .collect::<VecType<_>>()
+            .add_span(span);
+        Ok(TypeKind { name, kinds })
+    }
+
+    fn sub(self, right: Type) -> Result<Self, String> {
+        let TypeKind { name, kinds } = self;
+        let Spanned { val, span } = kinds;
+        let kinds = val
+            .inner()
+            .into_iter()
+            .map(|t| t.sub(right.clone()))
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .flatten()
+            .collect::<VecType<_>>()
+            .add_span(span);
+        Ok(TypeKind { name, kinds })
+    }
+
+    fn div(self, right: Type) -> Result<Self, String> {
+        let TypeKind { name, kinds } = self;
+        let Spanned { val, span } = kinds;
+        let kinds = val
+            .inner()
+            .into_iter()
+            .map(|t| t.div(right.clone()))
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .flatten()
+            .collect::<VecType<_>>()
+            .add_span(span);
+        Ok(TypeKind { name, kinds })
+    }
+
+    fn pow(self, right: Type) -> Result<Self, String> {
+        let TypeKind { name, kinds } = self;
+        let Spanned { val, span } = kinds;
+        let kinds = val
+            .inner()
+            .into_iter()
+            .map(|t| t.pow(right.clone()))
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .flatten()
+            .collect::<VecType<_>>()
+            .add_span(span);
+        Ok(TypeKind { name, kinds })
+    }
 }
 
 impl Int {
@@ -170,6 +230,122 @@ impl Int {
                         from: s.from + val,
                         step: s.step,
                         to: s.to + val,
+                    }),
+                })
+            })
+            .collect()
+    }
+    pub(crate) fn mul(self, val: Type) -> Result<VecType<Self>, String> {
+        let val = match val {
+            Type::Int(i) => i,
+            _ => return Err(format!("Cannot use * for `{}` and `{}` types", self, val)),
+        };
+        val.kinds
+            .inner()
+            .into_iter()
+            .map(|val| {
+                let val = match val {
+                    Int::Value(v) => v,
+                    _ => return Err(format!("Cannot use * for `{}` and `{}` types", self, val)),
+                };
+                Ok(match self.clone() {
+                    Int::Value(v) => Int::Value(v * val),
+                    Int::Bound(b) => Int::Bound(b.mul(val)?),
+                    Int::KnownBound { low, high } => Int::KnownBound {
+                        low: low * val,
+                        high: high * val,
+                    },
+                    Int::Slice(s) => Int::Slice(Slice {
+                        from: s.from * val,
+                        step: s.step * val,
+                        to: s.to * val,
+                    }),
+                })
+            })
+            .collect()
+    }
+    pub(crate) fn sub(self, val: Type) -> Result<VecType<Self>, String> {
+        let val = match val {
+            Type::Int(i) => i,
+            _ => return Err(format!("Cannot use - for `{}` and `{}` types", self, val)),
+        };
+        val.kinds
+            .inner()
+            .into_iter()
+            .map(|val| {
+                let val = match val {
+                    Int::Value(v) => v,
+                    _ => return Err(format!("Cannot use - for `{}` and `{}` types", self, val)),
+                };
+                Ok(match self.clone() {
+                    Int::Value(v) => Int::Value(v - val),
+                    Int::Bound(b) => Int::Bound(b.add(-val)?),
+                    Int::KnownBound { low, high } => Int::KnownBound {
+                        low: low - val,
+                        high: high - val,
+                    },
+                    Int::Slice(s) => Int::Slice(Slice {
+                        from: s.from - val,
+                        step: s.step,
+                        to: s.to - val,
+                    }),
+                })
+            })
+            .collect()
+    }
+    pub(crate) fn div(self, val: Type) -> Result<VecType<Self>, String> {
+        let val = match val {
+            Type::Int(i) => i,
+            _ => return Err(format!("Cannot use / for `{}` and `{}` types", self, val)),
+        };
+        val.kinds
+            .inner()
+            .into_iter()
+            .map(|val| {
+                let val = match val {
+                    Int::Value(v) => v,
+                    _ => return Err(format!("Cannot use / for `{}` and `{}` types", self, val)),
+                };
+                Ok(match self.clone() {
+                    Int::Value(v) => Int::Value(v + val),
+                    Int::Bound(b) => Int::Bound(b.div(val)?),
+                    Int::KnownBound { low, high } => Int::KnownBound {
+                        low: low / val,
+                        high: high / val,
+                    },
+                    Int::Slice(s) => Int::Slice(Slice {
+                        from: s.from / val,
+                        step: s.step,
+                        to: s.to / val,
+                    }),
+                })
+            })
+            .collect()
+    }
+    pub(crate) fn pow(self, val: Type) -> Result<VecType<Self>, String> {
+        let val = match val {
+            Type::Int(i) => i,
+            _ => return Err(format!("Cannot use ^ for `{}` and `{}` types", self, val)),
+        };
+        val.kinds
+            .inner()
+            .into_iter()
+            .map(|val| {
+                let val = match val {
+                    Int::Value(v) => v,
+                    _ => return Err(format!("Cannot use ^ for `{}` and `{}` types", self, val)),
+                };
+                Ok(match self.clone() {
+                    Int::Value(v) => Int::Value(v.pow(val as u32)),
+                    Int::Bound(b) => Int::Bound(b.pow(val)?),
+                    Int::KnownBound { low, high } => Int::KnownBound {
+                        low: low.pow(val as u32),
+                        high: high.pow(val as u32),
+                    },
+                    Int::Slice(s) => Int::Slice(Slice {
+                        from: s.from.pow(val as u32),
+                        step: s.step.pow(val as u32),
+                        to: s.to.pow(val as u32),
                     }),
                 })
             })
@@ -402,13 +578,26 @@ impl Display for OneRangeIntBound {
 }
 
 impl OneRangeIntBound {
-    pub fn add(self, val: i128) -> Result<Self, String> {
+    fn map<F: Fn(i128) -> i128>(self, label: &str, f: F) -> Result<Self, String> {
         match self {
-            OneRangeIntBound::None => Err(format!("try add {} to empty bound", val)),
-            OneRangeIntBound::Low(l) => Ok(OneRangeIntBound::Low(l + val)),
-            OneRangeIntBound::NotEqual(l) => Ok(OneRangeIntBound::NotEqual(l + val)),
-            OneRangeIntBound::High(h) => Ok(OneRangeIntBound::High(h + val)),
+            OneRangeIntBound::None => Err(format!("try {} to empty bound", label)),
+            OneRangeIntBound::Low(l) => Ok(OneRangeIntBound::Low(f(l))),
+            OneRangeIntBound::NotEqual(l) => Ok(OneRangeIntBound::NotEqual(f(l))),
+            OneRangeIntBound::High(h) => Ok(OneRangeIntBound::High(f(h))),
         }
+    }
+
+    pub fn add(self, val: i128) -> Result<Self, String> {
+        self.map("add", |v| v + val)
+    }
+    pub fn mul(self, val: i128) -> Result<Self, String> {
+        self.map("mul", |v| v * val)
+    }
+    pub fn div(self, val: i128) -> Result<Self, String> {
+        self.map("mul", |v| v / val)
+    }
+    pub fn pow(self, val: i128) -> Result<Self, String> {
+        self.map("mul", |v| v.pow(val as u32))
     }
 }
 

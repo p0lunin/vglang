@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 #[derive(Debug, PartialEq)]
 pub struct EnumType {
-    decl: EnumDecl,
+    pub(crate) decl: EnumDecl,
     variants: Vec<Rc<EnumVariant>>,
 }
 

@@ -13,14 +13,44 @@ pub use type_check::type_check_objects;
 
 use crate::error::Error;
 use crate::object::{parse_function, AllObject, Object};
-use crate::parser::TopLevelToken;
+use crate::parser::{EnumDecl, EnumVariant, EnumVariantKind, TopLevelToken};
 use crate::r#enum::EnumType;
-use crate::spanned::Spanned;
+use crate::spanned::{Span, Spanned};
 use crate::type_check::Context;
 use crate::types::{Type, TypeType};
 use itertools::Itertools;
 use std::collections::{LinkedList, VecDeque};
 use std::rc::Rc;
+
+/*
+fn initialize_bool() -> (AllObject, Rc<Spanned<Type>>) {
+      const BOOL: AllObject = AllObject::Enum(Rc::new(EnumType::from_ast(EnumDecl {
+            name: Spanned::new("Bool".to_owned(), Span::new(0, 0)),
+            variants: vec![
+                Spanned::new(EnumVariant {
+                    name: Spanned::new("True".to_owned(), Span::new(0, 0)),
+                    kind: EnumVariantKind::Unit
+                }, Span::new(0, 0)),
+                Spanned::new(EnumVariant {
+                    name: Spanned::new("False".to_owned(), Span::new(0, 0)),
+                    kind: EnumVariantKind::Unit
+                }, Span::new(0, 0)),
+            ]
+        }, &Context { objects: vec![], parent: None }).unwrap()));
+    };
+    lazy_static! {
+        static ref BOOL_TYPE: Rc<Spanned<Type>> = BOOL.call();
+    };
+    (BOOL, BOOL_TYPE)
+}
+
+fn get_bool_enum() -> AllObject {
+    initialize_bool().0
+}
+
+fn get_bool_type() -> Rc<Spanned<Type>> {
+    initialize_bool().1
+}*/
 
 pub fn parse_tokens<'a>(tokens: Vec<Spanned<TopLevelToken>>) -> Result<Context<'a>, Vec<Error>> {
     let mut errors = vec![];

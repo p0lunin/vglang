@@ -225,6 +225,21 @@ impl Type {
         apply_op!(self, value, or)
     }
 
+    pub fn div(self, value: Type) -> Result<Self, String> {
+        let value = value.get_inner();
+        apply_op!(self, value, div)
+    }
+
+    pub fn mul(self, value: Type) -> Result<Self, String> {
+        let value = value.get_inner();
+        apply_op!(self, value, mul)
+    }
+
+    pub fn pow(self, value: Type) -> Result<Self, String> {
+        let value = value.get_inner();
+        apply_op!(self, value, pow)
+    }
+
     pub fn neg(self) -> Result<Self, String> {
         match self {
             Type::Int(t) => t.neg().map(Type::Int),
@@ -310,6 +325,10 @@ pub trait TypeOperable<T>: Sized {
     fn neg(self) -> Result<Self, String>;
     fn and(self, right: Type) -> Result<Self, String>;
     fn or(self, right: Type) -> Result<Self, String>;
+    fn mul(self, right: Type) -> Result<Self, String>;
+    fn sub(self, right: Type) -> Result<Self, String>;
+    fn div(self, right: Type) -> Result<Self, String>;
+    fn pow(self, right: Type) -> Result<Self, String>;
 }
 
 impl Type {
@@ -457,6 +476,22 @@ impl TypeOperable<TypeType> for OneTypeKind<TypeType> {
     fn or(self, right: Type) -> Result<Self, String> {
         Err("| is not allowed for `Type` value".to_owned())
     }
+
+    fn mul(self, right: Type) -> Result<Self, String> {
+        Err("* is not allowed for `Type` value".to_owned())
+    }
+
+    fn sub(self, right: Type) -> Result<Self, String> {
+        Err("- is not allowed for `Type` value".to_owned())
+    }
+
+    fn div(self, right: Type) -> Result<Self, String> {
+        Err("/ is not allowed for `Type` value".to_owned())
+    }
+
+    fn pow(self, right: Type) -> Result<Self, String> {
+        Err("^ is not allowed for `Type` value".to_owned())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -477,6 +512,22 @@ impl TypeOperable<Unknown> for OneTypeKind<Unknown> {
 
     fn or(self, right: Type) -> Result<Self, String> {
         Err("| is not allowed for `Unknown` value".to_owned())
+    }
+
+    fn mul(self, right: Type) -> Result<Self, String> {
+        Err("* is not allowed for `Unknown` value".to_owned())
+    }
+
+    fn sub(self, right: Type) -> Result<Self, String> {
+        Err("- is not allowed for `Unknown` value".to_owned())
+    }
+
+    fn div(self, right: Type) -> Result<Self, String> {
+        Err("/ is not allowed for `Unknown` value".to_owned())
+    }
+
+    fn pow(self, right: Type) -> Result<Self, String> {
+        Err("^ is not allowed for `Unknown` value".to_owned())
     }
 }
 
