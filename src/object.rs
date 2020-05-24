@@ -1,8 +1,9 @@
 use crate::error::Error;
 use crate::parser::{Ast, FunctionDef, FunctionImpl, Token};
+use crate::r#enum::{CreateEnumVariantFunc, EnumType, EnumVariant, EnumVariantInstance};
 use crate::spanned::{AddSpan, Span, Spanned};
 use crate::type_check::Context;
-use crate::types::{parse_type_helper, Function, Type, TypeType};
+use crate::types::{parse_type_helper, Function, Int, Type, TypeKind, TypeType, VecType};
 use either::Either;
 use std::fmt::{Debug, Display, Formatter};
 use std::rc::Rc;
@@ -11,6 +12,10 @@ use std::rc::Rc;
 pub enum AllObject {
     Type(Rc<Object<Rc<Spanned<Type>>>>),
     FunctionDefinition(Rc<FunctionDefinition>),
+    Enum(Rc<EnumType>),
+    EnumVariant(Rc<EnumVariant>),
+    EnumVariantInstance(Rc<EnumVariantInstance>),
+    CreateEnumVariantFunc(CreateEnumVariantFunc),
     Function(Rc<Object<FunctionObject>>),
     CurriedFunction(Rc<CurriedFunction>),
     Arg(Rc<Object<Arg>>),
@@ -26,6 +31,10 @@ impl Display for AllObject {
             AllObject::FunctionDefinition(f) => unimplemented!(),
             AllObject::CurriedFunction(_) => unimplemented!(),
             AllObject::Arg(_) => unimplemented!(),
+            AllObject::Enum(e) => Display::fmt(e, f),
+            AllObject::EnumVariant(e) => Display::fmt(e, f),
+            AllObject::CreateEnumVariantFunc(e) => unimplemented!(),
+            AllObject::EnumVariantInstance(_) => unimplemented!(),
         }
     }
 }
@@ -39,6 +48,10 @@ impl AllObject {
             AllObject::FunctionDefinition(t) => &t.name,
             AllObject::CurriedFunction(f) => &f.orig.name(),
             AllObject::Arg(a) => &a.name,
+            AllObject::Enum(e) => e.name(),
+            AllObject::EnumVariant(e) => e.name(),
+            AllObject::CreateEnumVariantFunc(e) => e.name(),
+            AllObject::EnumVariantInstance(e) => e.name(),
         }
     }
     pub fn call(&self) -> Rc<Spanned<Type>> {
@@ -49,6 +62,14 @@ impl AllObject {
             AllObject::FunctionDefinition(f) => f.ftype.clone(),
             AllObject::CurriedFunction(f) => f.ftype.clone(),
             AllObject::Arg(a) => a.object.atype.clone(),
+            AllObject::Enum(e) => Rc::new(Spanned::new(Type::Enum(e.clone()), e.span())),
+            AllObject::EnumVariant(e) => {
+                Rc::new(Spanned::new(Type::EnumVariant(e.clone()), e.span()))
+            }
+            AllObject::CreateEnumVariantFunc(f) => f.call(),
+            AllObject::EnumVariantInstance(e) => {
+                Rc::new(Spanned::new(Type::EnumVariantInstance(e.clone()), e.span()))
+            }
         }
     }
     pub fn call_with_arg_expr(&self, arg: Expr, span: Span) -> Result<AllObject, Error> {
@@ -82,6 +103,23 @@ impl AllObject {
                 scope: vec![arg],
                 orig: Callable::Arg(a.clone()),
             }))),
+            AllObject::Enum(_) => Err(Error::Span(span)), // TODO: implement
+            AllObject::EnumVariant(e) => Ok(e.call_with_arg_expr(arg)),
+            AllObject::CreateEnumVariantFunc(f) => f.call_with_arg_expr(arg),
+            AllObject::EnumVariantInstance(_) => Err(Error::Span(span)),
+        }
+    }
+    pub fn try_get_member(&self, member: &str, span: Span) -> Result<AllObject, Error> {
+        match self {
+            AllObject::Enum(e) => e.try_get_member(member).ok_or(Error::Span(span)),
+            AllObject::Var(v) => v.object.data.try_get_member(member, span),
+            _ => Err(Error::Span(span)),
+        }
+    }
+    pub fn type_check_self(&self, ctx: &Context) -> Result<Rc<Spanned<Type>>, Error> {
+        match self {
+            AllObject::EnumVariantInstance(i) => i.type_check_self(ctx),
+            _ => Ok(self.call()),
         }
     }
 }
@@ -175,12 +213,30 @@ pub enum Expr {
 }
 
 impl Expr {
+    pub fn span(&self) -> Span {
+        match self {
+            Expr::Int(i) => i.span,
+            Expr::Add(l, r) => l.span().extend(&r.span()),
+            Expr::Sub(l, r) => l.span().extend(&r.span()),
+            Expr::Object(o) => o.span,
+        }
+    }
     pub fn add(self, other: Expr) -> Self {
         match (self, other) {
             (Expr::Int(i), Expr::Int(n)) => {
                 Expr::Int(Spanned::new(*i + *n, i.span.extend(&n.span)))
             }
             (l, r) => Expr::Add(Box::new(l), Box::new(r)),
+        }
+    }
+    pub fn try_get_type(&self) -> Option<Type> {
+        match self {
+            Expr::Int(i) => Some(Type::Int(TypeKind::from_kinds(Spanned::new(
+                VecType::one(Int::Value(**i)),
+                i.span,
+            )))),
+            Expr::Object(o) => Some((**o.call()).clone()),
+            _ => None,
         }
     }
 }
@@ -202,11 +258,6 @@ impl Var {
     pub fn get_type(&self) -> Rc<Spanned<Type>> {
         self.data.call()
     }
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct IntObject {
-    pub data: Spanned<i128>,
 }
 
 pub fn parse_function(
@@ -307,6 +358,25 @@ pub fn parse_expr(token: Token, ctx: &Context) -> Result<Expr, Error> {
                 _ => Err(Error::Span(token.span)),
             }
         }
-        _ => unimplemented!(),
+        Ast::Dot(l, r) => {
+            let left_expr = parse_expr(*l, ctx)?;
+            let right_expr = match r.ast {
+                Ast::Ident(i) => i.0,
+                _ => return Err(Error::Span(r.span)),
+            };
+            let span = token.span;
+            match left_expr {
+                Expr::Object(o) => o
+                    .try_get_member(right_expr.as_str(), span)
+                    .map(|o| Spanned::new(o, span))
+                    .map(Expr::Object),
+                _ => Err(Error::Span(span)),
+            }
+        }
+        Ast::Parenthesis(p) => parse_expr(*p, ctx),
+        a => {
+            dbg!(a);
+            unimplemented!()
+        }
     }
 }

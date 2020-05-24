@@ -60,7 +60,7 @@ pub fn type_check_function(function: &FunctionObject, top: &Context) -> Result<(
     }
 }
 
-fn type_check_expr(expr: &Expr, ctx: &Context) -> Result<Rc<Spanned<Type>>, Error> {
+pub fn type_check_expr(expr: &Expr, ctx: &Context) -> Result<Rc<Spanned<Type>>, Error> {
     match expr {
         Expr::Int(i) => Ok((i.get_type())),
         Expr::Add(l, r) => {
@@ -70,7 +70,7 @@ fn type_check_expr(expr: &Expr, ctx: &Context) -> Result<Rc<Spanned<Type>>, Erro
             Ok(Rc::new(Spanned::new(
                 (**left)
                     .clone()
-                    .op_add((**right).clone())
+                    .add((**right).clone())
                     .spanned_err(new_span)?,
                 new_span,
             )))
@@ -82,14 +82,11 @@ fn type_check_expr(expr: &Expr, ctx: &Context) -> Result<Rc<Spanned<Type>>, Erro
             Ok(Rc::new(Spanned::new(
                 (**left)
                     .clone()
-                    .op_sub((**right).clone())
+                    .sub((**right).clone())
                     .spanned_err(new_span)?,
                 new_span,
             )))
         }
-        Expr::Object(o) => Ok(Rc::new(Spanned::new(
-            Type::AnotherType(Spanned::new(o.call(), o.span)),
-            o.span,
-        ))),
+        Expr::Object(o) => o.type_check_self(ctx),
     }
 }

@@ -49,6 +49,7 @@ pub enum Ast {
     Implication(Box<Token>, Box<Token>),
     Named(Spanned<Ident>, Box<Token>),
     CallFunction(Box<Token>, Box<Token>),
+    Dot(Box<Token>, Box<Token>),
 }
 
 #[derive(Debug, PartialEq)]
@@ -56,9 +57,11 @@ pub enum TopLevelToken {
     Type(Type),
     FunctionDef(FunctionDef),
     FunctionImpl(FunctionImpl),
+    EnumDecl(EnumDecl),
     NewLine,
     Comment,
 }
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct Ident(pub String);
 
@@ -94,12 +97,30 @@ pub struct FunctionImpl(
 #[derive(Debug, PartialEq)]
 pub struct FunctionBody(pub Token);
 
+#[derive(Debug, PartialEq)]
+pub struct EnumDecl {
+    pub name: Spanned<String>,
+    pub variants: Vec<Spanned<EnumVariant>>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct EnumVariant {
+    pub name: Spanned<String>,
+    pub kind: EnumVariantKind,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum EnumVariantKind {
+    Unit,
+    WithData(Vec<Token>),
+}
+
 peg::parser! { grammar lang() for str {
     pub rule parse_lang() -> Vec<Spanned<TopLevelToken>>
         = (top_level_token())*
 
     rule top_level_token() -> Spanned<TopLevelToken>
-        = type_declaration() / new_line() / comment() / FunctionDef(1) / function_impl(1)
+        = type_declaration() / new_line() / comment() / FunctionDef(1) / function_impl(1) / enum_decl()
 
     rule comment() -> Spanned<TopLevelToken>
         = start:position!() "//" (all_except_new_line())* (new_line() / ![_]) end:position!() {
@@ -132,7 +153,28 @@ peg::parser! { grammar lang() for str {
     rule ident_space() -> Spanned<Ident>
         = i:ident() __ { i }
 
+    rule types_space(i: usize) -> Token
+        = t:logic(i) _ { t }
+
+    rule enum_decl() -> Spanned<TopLevelToken>
+        = s:position!() "enum" __ id:ident_string() vs:(block(1, <enum_variant(1)>))+ e:position!() {
+            Spanned::new(TopLevelToken::EnumDecl(EnumDecl {
+                name: id,
+                variants: vs,
+            }), Span::new(s, e))
+        }
+
+    rule enum_variant(i: usize) -> Spanned<EnumVariant>
+        = s:position!() id:ident_string() _ types:(types_space((i+1)))* e:position!() {
+            match types.len() {
+                0 => Spanned::new(EnumVariant { name: id, kind: EnumVariantKind::Unit }, Span::new(s, e)),
+                _ => Spanned::new(EnumVariant { name: id, kind: EnumVariantKind::WithData(types) }, Span::new(s, e))
+            }
+        }
+
     rule logic(i: usize) -> Token = precedence! {
+        x:(@) inli(i) "." inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Dot(Box::new(x), Box::new(y))) }
+        --
         x:(@) inli(i) "|" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Or(Box::new(x), Box::new(y))) }
         --
         x:(@) inli(i) "&" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::And(Box::new(x), Box::new(y))) }
@@ -246,6 +288,10 @@ peg::parser! { grammar lang() for str {
     rule ident() -> Spanned<Ident>
         = s:position!() ident:$(['a'..='z'|'A'..='Z'|'_'] ['a'..='z'|'A'..='Z'|'0'..='9'|'_']*) e:position!() {
             Spanned::new(Ident(String::from(ident)), Span::new(s, e))
+        }
+    rule ident_string() -> Spanned<String>
+        = s:position!() ident:$(['a'..='z'|'A'..='Z'|'_'] ['a'..='z'|'A'..='Z'|'0'..='9'|'_']*) e:position!() {
+            Spanned::new(String::from(ident), Span::new(s, e))
         }
 
     rule block<T>(i: usize, rul: rule<T>) -> T

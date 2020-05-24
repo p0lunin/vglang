@@ -1,7 +1,8 @@
 use crate::error::{Error, SpannedError};
-use crate::object::AllObject;
+use crate::object::{parse_expr, AllObject};
 use crate::parser;
 use crate::parser::{Ast, Token};
+use crate::r#enum::{EnumType, EnumVariant, EnumVariantInstance};
 use crate::spanned::AddSpan;
 use crate::spanned::{Span, Spanned};
 use crate::type_check::Context;
@@ -19,6 +20,9 @@ use std::rc::Rc;
 pub enum Type {
     Function(OneTypeKind<Function>),
     Int(TypeKind<Int>),
+    Enum(Rc<EnumType>),
+    EnumVariant(Rc<EnumVariant>),
+    EnumVariantInstance(Rc<EnumVariantInstance>),
     Type(OneTypeKind<TypeType>),
     Unknown(OneTypeKind<Unknown>),
     ParenthesisType(Box<Type>),
@@ -46,6 +50,13 @@ impl Type {
             (Type::Named(_, l), Type::Named(_, r)) => l == r,
             (Type::Named(_, l), r) => l.is_part_of(r),
             (l, Type::Named(_, r)) => l.is_part_of(r),
+            (Type::EnumVariant(v), Type::Enum(e)) => e.has_variant(v),
+            (Type::EnumVariant(v), Type::EnumVariant(e)) => Rc::ptr_eq(v, e),
+            (Type::EnumVariantInstance(v), Type::Enum(e)) => e.has_variant(v.origin()),
+            (Type::EnumVariantInstance(v), Type::EnumVariant(e)) => Rc::ptr_eq(v.origin(), e),
+            (Type::EnumVariantInstance(v), Type::EnumVariantInstance(e)) => {
+                Rc::ptr_eq(v.origin(), e.origin())
+            }
             _ => false,
         }
     }
@@ -79,6 +90,56 @@ impl Type {
             t => t,
         }
     }
+
+    pub fn is_function(&self) -> bool {
+        match self {
+            Type::Function(_) => true,
+            _ => false,
+        }
+    }
+}
+
+macro_rules! apply_op {
+    ($self:tt, $value:tt, $op:tt) => {
+        match $self {
+            Type::Int(t) => t.$op($value).map(Type::Int),
+            Type::Type(t) => t.$op($value).map(Type::Type),
+            Type::Unknown(t) => t.$op($value).map(Type::Unknown),
+            Type::Function(t) => t.$op($value).map(Type::Function),
+            Type::AnotherType(t) => {
+                let mut inner = (***t).clone();
+                inner.remove_name();
+                inner.$op($value)
+            }
+            Type::ParenthesisType(mut t) => {
+                t.remove_name();
+                t.$op($value)
+            }
+            Type::Named(_, t) => {
+                let mut inner = (**t).clone();
+                inner.remove_name();
+                inner.$op($value)
+            }
+            Type::Enum(e) => Err(format!(
+                "Cannot {} enum type {} to {}",
+                stringify!($op),
+                e,
+                $value
+            )),
+            Type::EnumVariant(e) => Err(format!(
+                "Cannot {} enum variant type {} to {}",
+                stringify!($op),
+                e,
+                $value
+            )),
+            Type::EnumVariantInstance(e) => Err(format!(
+                "Cannot {} enum variant instance type {} to {}",
+                stringify!($op),
+                e,
+                $value
+            )),
+        }
+    };
 }
 
 impl Display for Type {
@@ -91,6 +152,9 @@ impl Display for Type {
             Type::AnotherType(t) => Display::fmt(t, f),
             Type::ParenthesisType(t) => Display::fmt(t, f),
             Type::Named(name, def) => f.write_str(&format!("{{{}: {}}}", name, def)),
+            Type::Enum(e) => Display::fmt(e, f),
+            Type::EnumVariant(e) => Display::fmt(e, f),
+            Type::EnumVariantInstance(e) => Display::fmt(e, f),
         }
     }
 }
@@ -105,6 +169,9 @@ impl Type {
             Type::AnotherType(t) => t.span(),
             Type::ParenthesisType(t) => t.span(),
             Type::Named(name, def) => name.span.extend(&def.span),
+            Type::Enum(e) => e.span(),
+            Type::EnumVariant(e) => e.span(),
+            Type::EnumVariantInstance(e) => e.span(),
         }
     }
 
@@ -117,6 +184,9 @@ impl Type {
             Type::AnotherType(t) => unreachable!(),
             Type::ParenthesisType(t) => unreachable!(),
             Type::Named(_, _) => unreachable!(),
+            Type::Enum(_) => unreachable!(),
+            Type::EnumVariant(_) => unreachable!(),
+            Type::EnumVariantInstance(_) => unreachable!(),
         }
     }
 
@@ -129,129 +199,33 @@ impl Type {
             Type::AnotherType(t) => unreachable!(),
             Type::ParenthesisType(t) => unreachable!(),
             Type::Named(_, _) => unreachable!(),
+            Type::Enum(_) => unreachable!(),
+            Type::EnumVariant(_) => unreachable!(),
+            Type::EnumVariantInstance(_) => unreachable!(),
         }
     }
-    /*
-    fn apply_op<F: Fn(T) -> Result<T, String>, T>(self, f: F) -> Result<Self, String> {
-        match self {
-            Type::Int(t) => f(t).map(Type::Int),
-            Type::Type(t) => f(t).map(Type::Type),
-            Type::Unknown(t) => t.add(value).map(Type::Unknown),
-            Type::Function(t) => t.add(value).map(Type::Function),
-            Type::AnotherType(t) => {
-                let mut inner = (***t).clone();
-                inner.remove_name();
-                inner.op_add(value)
-            }
-            Type::ParenthesisType(mut t) => {
-                t.remove_name();
-                t.op_add(value)
-            }
-            Type::Named(_, t) => {
-                let mut inner = (**t).clone();
-                inner.remove_name();
-                inner.op_add(value)
-            }
-        }
-    }*/
 
-    pub fn op_add(self, value: Type) -> Result<Self, String> {
+    pub fn add(self, value: Type) -> Result<Self, String> {
         let value = value.get_inner();
-        match self {
-            Type::Int(t) => t.add(value).map(Type::Int),
-            Type::Type(t) => t.add(value).map(Type::Type),
-            Type::Unknown(t) => t.add(value).map(Type::Unknown),
-            Type::Function(t) => t.add(value).map(Type::Function),
-            Type::AnotherType(t) => {
-                let mut inner = (***t).clone();
-                inner.remove_name();
-                inner.op_add(value)
-            }
-            Type::ParenthesisType(mut t) => {
-                t.remove_name();
-                t.op_add(value)
-            }
-            Type::Named(_, t) => {
-                let mut inner = (**t).clone();
-                inner.remove_name();
-                inner.op_add(value)
-            }
-        }
+        apply_op!(self, value, add)
     }
 
-    pub fn op_sub(self, value: Type) -> Result<Self, String> {
+    pub fn sub(self, value: Type) -> Result<Self, String> {
+        let value = value.get_inner().neg()?;
+        apply_op!(self, value, add)
+    }
+
+    pub fn and(self, value: Type) -> Result<Self, String> {
         let value = value.get_inner();
-        match self {
-            Type::Int(t) => t.add(value.op_neg()?).map(Type::Int),
-            Type::Type(t) => t.add(value.op_neg()?).map(Type::Type),
-            Type::Unknown(t) => t.add(value.op_neg()?).map(Type::Unknown),
-            Type::Function(t) => t.add(value.op_neg()?).map(Type::Function),
-            Type::AnotherType(t) => {
-                let mut inner = (***t).clone();
-                inner.remove_name();
-                inner.op_add(value.op_neg()?)
-            }
-            Type::ParenthesisType(mut t) => {
-                t.remove_name();
-                t.op_add(value.op_neg()?)
-            }
-            Type::Named(_, t) => {
-                let mut inner = (**t).clone();
-                inner.remove_name();
-                inner.op_add(value.op_neg()?)
-            }
-        }
+        apply_op!(self, value, and)
     }
 
-    pub fn op_and(self, value: Type) -> Result<Self, String> {
+    pub fn or(self, value: Type) -> Result<Self, String> {
         let value = value.get_inner();
-        match self {
-            Type::Int(t) => t.and(value).map(Type::Int),
-            Type::Type(t) => t.and(value).map(Type::Type),
-            Type::Unknown(t) => t.and(value).map(Type::Unknown),
-            Type::Function(t) => t.and(value).map(Type::Function),
-            Type::AnotherType(t) => {
-                let mut inner = (***t).clone();
-                inner.remove_name();
-                inner.op_and(value)
-            }
-            Type::ParenthesisType(mut t) => {
-                t.remove_name();
-                t.op_and(value)
-            }
-            Type::Named(_, t) => {
-                let mut inner = (**t).clone();
-                inner.remove_name();
-                inner.op_and(value)
-            }
-        }
+        apply_op!(self, value, or)
     }
 
-    pub fn op_or(self, value: Type) -> Result<Self, String> {
-        let value = value.get_inner();
-        match self {
-            Type::Int(t) => t.or(value).map(Type::Int),
-            Type::Type(t) => t.or(value).map(Type::Type),
-            Type::Unknown(t) => t.or(value).map(Type::Unknown),
-            Type::Function(t) => t.or(value).map(Type::Function),
-            Type::AnotherType(t) => {
-                let mut inner = (***t).clone();
-                inner.remove_name();
-                inner.op_or(value)
-            }
-            Type::ParenthesisType(mut t) => {
-                t.remove_name();
-                t.op_or(value)
-            }
-            Type::Named(_, t) => {
-                let mut inner = (**t).clone();
-                inner.remove_name();
-                inner.op_or(value)
-            }
-        }
-    }
-
-    pub fn op_neg(self) -> Result<Self, String> {
+    pub fn neg(self) -> Result<Self, String> {
         match self {
             Type::Int(t) => t.neg().map(Type::Int),
             Type::Type(t) => t.neg().map(Type::Type),
@@ -260,16 +234,21 @@ impl Type {
             Type::AnotherType(t) => {
                 let mut inner = (***t).clone();
                 inner.remove_name();
-                inner.op_neg()
+                inner.neg()
             }
             Type::ParenthesisType(mut t) => {
                 t.remove_name();
-                t.op_neg()
+                t.neg()
             }
             Type::Named(_, t) => {
                 let mut inner = (**t).clone();
                 inner.remove_name();
-                inner.op_neg()
+                inner.neg()
+            }
+            Type::Enum(e) => Err(format!("Cannot neg enum type {}", e)),
+            Type::EnumVariant(e) => Err(format!("Cannot neg enum variant type {}", e)),
+            Type::EnumVariantInstance(e) => {
+                Err(format!("Cannot neg enum variant instance type {}", e))
             }
         }
     }
@@ -372,18 +351,9 @@ impl Type {
             Type::AnotherType(i) => i.name(),
             Type::ParenthesisType(t) => t.name(),
             Type::Named(t, _) => t.as_str(),
-        }
-    }
-    // TODO: remove it
-    pub fn main_type(&self) -> MainType {
-        match self {
-            Type::Int(_) => MainType::Int,
-            Type::Type(_) => MainType::Type,
-            Type::Unknown(_) => MainType::Unknown,
-            Type::Function(_) => MainType::Function,
-            Type::AnotherType(t) => t.main_type(),
-            Type::ParenthesisType(t) => t.main_type(),
-            Type::Named(_, t) => t.main_type(),
+            Type::Enum(e) => e.name(),
+            Type::EnumVariant(e) => e.name(),
+            Type::EnumVariantInstance(e) => e.name(),
         }
     }
 }
@@ -510,14 +480,6 @@ impl TypeOperable<Unknown> for OneTypeKind<Unknown> {
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub enum MainType {
-    Int,
-    Function,
-    Type,
-    Unknown,
-}
-
 pub fn parse_type(
     type_def: Spanned<parser::Type>,
     ctx: &Context,
@@ -535,18 +497,18 @@ pub fn parse_type_helper(token: Token, ctx: &Context) -> Result<Type, Error> {
     let span = token.span;
     match token.ast {
         Ast::And(l, r) => parse_type_helper(*l, ctx).and_then(|left| {
-            parse_type_helper(*r, ctx).and_then(|right| left.op_and(right).spanned_err(span))
+            parse_type_helper(*r, ctx).and_then(|right| left.and(right).spanned_err(span))
         }),
         Ast::Or(l, r) => parse_type_helper(*l, ctx).and_then(|left| {
-            parse_type_helper(*r, ctx).and_then(|right| left.op_or(right).spanned_err(span))
+            parse_type_helper(*r, ctx).and_then(|right| left.or(right).spanned_err(span))
         }),
         Ast::Add(l, r) => parse_type_helper(*l, ctx).and_then(|left| {
-            parse_type_helper(*r, ctx).and_then(|right| left.op_add(right).spanned_err(span))
+            parse_type_helper(*r, ctx).and_then(|right| left.add(right).spanned_err(span))
         }),
         Ast::Sub(l, r) => parse_type_helper(*l, ctx).and_then(|left| {
-            parse_type_helper(*r, ctx).and_then(|right| left.op_sub(right).spanned_err(span))
+            parse_type_helper(*r, ctx).and_then(|right| left.sub(right).spanned_err(span))
         }),
-        Ast::Neg(t) => parse_type_helper(*t, ctx).and_then(|left| left.op_neg().spanned_err(span)),
+        Ast::Neg(t) => parse_type_helper(*t, ctx).and_then(|left| left.neg().spanned_err(span)),
         Ast::Int(i) => Ok(Type::Int(TypeKind {
             name: None,
             kinds: Spanned::new(VecType::one(Int::Value(i)), token.span),
@@ -560,7 +522,7 @@ pub fn parse_type_helper(token: Token, ctx: &Context) -> Result<Type, Error> {
                 TypeType, token.span,
             )))),
             name => match ctx.find(name) {
-                Some(AllObject::Type(t)) => Ok(Type::AnotherType(t.object.clone())),
+                Some(o) => Ok(Type::AnotherType(Spanned::new(o.call(), token.span))),
                 _ => Err(Error::Custom(
                     token.span,
                     format!("Type {} not found", name),
@@ -649,10 +611,7 @@ pub fn parse_type_helper(token: Token, ctx: &Context) -> Result<Type, Error> {
             Spanned::new(name.0.clone(), name.span),
             Rc::new(Spanned::new(parse_type_helper(*def, ctx)?, token.span)),
         )),
-        t => {
-            dbg!(t);
-            unimplemented!()
-        }
+        _ => parse_expr(token, ctx).and_then(|e| e.try_get_type().ok_or(Error::Span(span))),
     }
 }
 

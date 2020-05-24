@@ -44,11 +44,3 @@ impl TypeOperable<Function> for OneTypeKind<Function> {
         Err("| is not allowed for `Function` value".to_owned())
     }
 }
-
-fn check_def(def: &Spanned<FunctionDef>) -> Result<(), Error> {
-    unimplemented!()
-}
-
-fn check_impl(def: &Spanned<FunctionDef>, fimpl: &Spanned<FunctionImpl>) -> Result<(), Error> {
-    unimplemented!()
-}

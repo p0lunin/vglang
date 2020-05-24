@@ -1,3 +1,4 @@
+mod r#enum;
 mod error;
 mod error_builder;
 mod object;
@@ -13,6 +14,7 @@ pub use type_check::type_check_objects;
 use crate::error::Error;
 use crate::object::{parse_function, AllObject, Object};
 use crate::parser::TopLevelToken;
+use crate::r#enum::EnumType;
 use crate::spanned::Spanned;
 use crate::type_check::Context;
 use crate::types::{Type, TypeType};
@@ -47,6 +49,10 @@ pub fn parse_tokens<'a>(tokens: Vec<Spanned<TopLevelToken>>) -> Result<Context<'
             TopLevelToken::NewLine | TopLevelToken::Comment => {}
             TopLevelToken::FunctionDef(f) => function_defs.push(f),
             TopLevelToken::FunctionImpl(i) => function_impls.push_front(i),
+            TopLevelToken::EnumDecl(e) => match EnumType::from_ast(e, &ctx) {
+                Ok(e) => ctx.objects.push(AllObject::Enum(Rc::new(e))),
+                Err(err) => errors.push(err),
+            },
         }
     });
     function_defs.into_iter().for_each(|d| {
