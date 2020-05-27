@@ -2,6 +2,8 @@ use crate::error::{Error, SpannedError};
 use crate::object::{AllObject, Expr, FunctionObject, Object};
 use crate::spanned::Spanned;
 use crate::types::{Type, TypeType};
+use std::cell::RefCell;
+use std::ops::Deref;
 use std::rc::Rc;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -47,11 +49,12 @@ pub fn type_check_function(function: &FunctionObject, top: &Context) -> Result<(
     let body = function.body.as_ref();
     let return_type = function.get_return_type();
     let res_type = type_check_expr(body, &ctx)?;
-    match res_type.is_part_of(return_type) {
+    let borrowed = res_type.borrow();
+    match borrowed.is_part_of(return_type.deref()) {
         true => Ok(()),
         false => Err(Error::Custom(
-            res_type.span,
-            format!("Expected {} type, found {}", return_type, res_type),
+            body.span(),
+            format!("Expected {} type, found {}", return_type, res_type.borrow()),
             "-here".to_owned(),
         )),
     }
@@ -61,18 +64,19 @@ macro_rules! binary_op {
     ($l:tt, $r:tt, $ctx:tt, $op:tt) => {{
         let left = type_check_expr($l.as_ref(), $ctx)?;
         let right = type_check_expr($r.as_ref(), $ctx)?;
-        let new_span = left.span.extend(&right.span);
-        Ok(Rc::new(Spanned::new(
-            (**left)
+        let new_span = left.borrow().span().extend(&right.borrow().span());
+        let left_br = left.borrow();
+        let right_br = left.borrow();
+        Ok(Rc::new(RefCell::new(
+            left_br
                 .clone()
-                .$op((**right).clone())
+                .$op(right_br.clone())
                 .spanned_err(new_span)?,
-            new_span,
         )))
     }};
 }
 
-pub fn type_check_expr(expr: &Expr, ctx: &Context) -> Result<Rc<Spanned<Type>>, Error> {
+pub fn type_check_expr(expr: &Expr, ctx: &Context) -> Result<Rc<RefCell<Type>>, Error> {
     match expr {
         Expr::Int(i) => Ok((i.get_type())),
         Expr::Add(l, r) => binary_op!(l, r, ctx, add),
@@ -90,9 +94,8 @@ pub fn type_check_expr(expr: &Expr, ctx: &Context) -> Result<Rc<Spanned<Type>>, 
         Expr::Le(_, _) => unimplemented!(),
         Expr::LeOrEq(_, _) => unimplemented!(),
         Expr::Neg(e) => type_check_expr(&e, ctx).and_then(|ty| {
-            Ok(Rc::new(Spanned::new(
-                (**ty).clone().neg().spanned_err(e.span())?,
-                e.span(),
+            Ok(Rc::new(RefCell::new(
+                ty.borrow().clone().neg().spanned_err(e.span())?,
             )))
         }),
     }

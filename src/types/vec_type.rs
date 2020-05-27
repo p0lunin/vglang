@@ -1,5 +1,3 @@
-use crate::error::Error;
-use crate::spanned::Spanned;
 use crate::types::int::{Int, Slice};
 use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut};

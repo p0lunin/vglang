@@ -101,6 +101,7 @@ pub struct FunctionBody(pub Token);
 pub struct EnumDecl {
     pub name: Spanned<String>,
     pub variants: Vec<Spanned<EnumVariant>>,
+    pub generics: Vec<Spanned<Generic>>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -113,6 +114,11 @@ pub struct EnumVariant {
 pub enum EnumVariantKind {
     Unit,
     WithData(Vec<Token>),
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct Generic {
+    pub name: Spanned<String>,
 }
 
 peg::parser! { grammar lang() for str {
@@ -162,12 +168,22 @@ peg::parser! { grammar lang() for str {
         = t:logic(i) _ { t }
 
     rule enum_decl() -> Spanned<TopLevelToken>
-        = s:position!() "enum" __ id:ident_string() vs:(block(1, <enum_variant(1)>))+ e:position!() {
+        = s:position!() "enum" __ id:ident_string() gs:generics(1) vs:(block(1, <enum_variant(1)>))+ e:position!() {
             Spanned::new(TopLevelToken::EnumDecl(EnumDecl {
                 name: id,
                 variants: vs,
+                generics: gs,
             }), Span::new(s, e))
         }
+
+    rule generics(i: usize) -> Vec<Spanned<Generic>>
+        = "<" g:spaced(<generic(i)>) ** "," ">" { g }
+
+    rule spaced<T>(r: rule<T>) -> T
+        = _ data:r() _ { data }
+
+    rule generic(i: usize) -> Spanned<Generic>
+        = s:position!() name:ident_string() e:position!() { Spanned::new(Generic { name }, Span::new(s, e)) }
 
     rule enum_variant(i: usize) -> Spanned<EnumVariant>
         = s:position!() id:ident_string() _ types:(types_space((i+1)))* e:position!() {
@@ -178,6 +194,8 @@ peg::parser! { grammar lang() for str {
         }
 
     rule logic(i: usize) -> Token = precedence! {
+        x:(@) inli(i) "#" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::CallFunction(Box::new(x), Box::new(y))) }
+        --
         x:(@) inli(i) "." inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Dot(Box::new(x), Box::new(y))) }
         --
         x:(@) inli(i) "|" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Or(Box::new(x), Box::new(y))) }
@@ -201,8 +219,6 @@ peg::parser! { grammar lang() for str {
         x:@ inli(i) "^" inli(i) y:(@) { Token::new(x.span.extend(&y.span), Ast::Pow(Box::new(x), Box::new(y))) }
         --
         x:@ inli(i) "->" inli(i) y:(@) { Token::new(x.span.extend(&y.span), Ast::Implication(Box::new(x), Box::new(y)))}
-        --
-        x:(@) inli(i) "#" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::CallFunction(Box::new(x), Box::new(y))) }
         --
         start:position!() "(" inli(i) v:logic(i) inli(i) ")" end:position!() {
             Token::new(Span::new(start, end), Ast::Parenthesis(Box::new(v)))

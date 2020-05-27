@@ -17,9 +17,8 @@ use crate::parser::{EnumDecl, EnumVariant, EnumVariantKind, TopLevelToken};
 use crate::r#enum::EnumType;
 use crate::spanned::{Span, Spanned};
 use crate::type_check::Context;
-use crate::types::{Type, TypeType};
 use itertools::Itertools;
-use std::collections::{LinkedList, VecDeque};
+use std::collections::VecDeque;
 use std::rc::Rc;
 
 /*
@@ -66,13 +65,9 @@ pub fn parse_tokens<'a>(tokens: Vec<Spanned<TopLevelToken>>) -> Result<Context<'
             TopLevelToken::Type(ty) => {
                 let name = ty.0.clone().map(|i| i.0);
                 match types::parse_type(Spanned::new(ty, span), &ctx) {
-                    Ok(t) => {
-                        let span = t.span;
-                        ctx.objects.push(AllObject::Type(Rc::new(Object {
-                            name,
-                            object: Spanned::new(t, span),
-                        })))
-                    }
+                    Ok(ty) => ctx
+                        .objects
+                        .push(AllObject::Type(Rc::new(Object { name, object: ty }))),
                     Err(err) => errors.push(err),
                 }
             }

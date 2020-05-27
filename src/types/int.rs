@@ -1,10 +1,10 @@
-use crate::error::{Error, SpannedError};
 use crate::spanned::AddSpan;
 use crate::spanned::Spanned;
 use crate::types::common::Type;
 use crate::types::vec_type::VecType;
 use crate::types::{TypeKind, TypeOperable};
 use itertools::Itertools;
+use std::cell::RefCell;
 use std::cmp::{max, min};
 use std::fmt::{Display, Formatter};
 use std::ops::Add;
@@ -19,14 +19,11 @@ pub enum Int {
 }
 
 impl Spanned<i128> {
-    pub fn get_type(&self) -> Rc<Spanned<Type>> {
-        Rc::new(Spanned::new(
-            Type::Int(TypeKind::from_kinds(Spanned::new(
-                VecType::one(Int::Value(self.val)),
-                self.span,
-            ))),
+    pub fn get_type(&self) -> Rc<RefCell<Type>> {
+        Rc::new(RefCell::new(Type::Int(TypeKind::from_kinds(Spanned::new(
+            VecType::one(Int::Value(self.val)),
             self.span,
-        ))
+        )))))
     }
 }
 

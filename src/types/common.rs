@@ -2,17 +2,16 @@ use crate::error::{Error, SpannedError};
 use crate::object::{parse_expr, AllObject};
 use crate::parser;
 use crate::parser::{Ast, Token};
-use crate::r#enum::{EnumType, EnumVariant, EnumVariantInstance};
+use crate::r#enum::{EnumType, EnumVariant, EnumVariantInstance, EnumInstance};
 use crate::spanned::AddSpan;
 use crate::spanned::{Span, Spanned};
 use crate::type_check::Context;
 use crate::types::function::Function;
 use crate::types::int::{Int, OneRangeIntBound, Slice};
 use crate::types::vec_type::VecType;
-use std::cmp::{max, min};
+use std::cell::{Ref, RefCell};
 use std::convert::TryFrom;
 use std::fmt::{Debug, Display, Formatter};
-use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 
@@ -21,13 +20,15 @@ pub enum Type {
     Function(OneTypeKind<Function>),
     Int(TypeKind<Int>),
     Enum(Rc<EnumType>),
+    EnumInstance(Rc<EnumInstance>),
     EnumVariant(Rc<EnumVariant>),
     EnumVariantInstance(Rc<EnumVariantInstance>),
     Type(OneTypeKind<TypeType>),
     Unknown(OneTypeKind<Unknown>),
-    ParenthesisType(Box<Type>),
-    AnotherType(Spanned<Rc<Spanned<Type>>>),
-    Named(Spanned<String>, Rc<Spanned<Type>>),
+    ParenthesisType(Rc<RefCell<Type>>),
+    AnotherType(Spanned<Rc<RefCell<Type>>>),
+    Named(Spanned<String>, Rc<RefCell<Type>>),
+    Generic(Spanned<String>),
 }
 
 impl Type {
@@ -43,51 +44,53 @@ impl Type {
                     .all(|l| r.kinds.iter().any(|r| l.is_part_of(r))),
             },
             (_, Type::Type(_)) => true,
-            (Type::AnotherType(l), r) => l.is_part_of(r),
-            (l, Type::AnotherType(r)) => l.is_part_of(r),
-            (Type::ParenthesisType(l), r) => l.is_part_of(r),
-            (l, Type::ParenthesisType(r)) => l.is_part_of(r),
+            (Type::AnotherType(l), r) => l.borrow().is_part_of(r),
+            (l, Type::AnotherType(r)) => l.is_part_of(r.borrow().deref()),
+            (Type::ParenthesisType(l), r) => l.borrow().is_part_of(r),
+            (l, Type::ParenthesisType(r)) => l.is_part_of(r.borrow().deref()),
             (Type::Named(_, l), Type::Named(_, r)) => l == r,
-            (Type::Named(_, l), r) => l.is_part_of(r),
-            (l, Type::Named(_, r)) => l.is_part_of(r),
-            (Type::EnumVariant(v), Type::Enum(e)) => e.has_variant(v),
+            (Type::Named(_, l), r) => l.borrow().is_part_of(r),
+            (l, Type::Named(_, r)) => l.is_part_of(r.borrow().deref()),
             (Type::EnumVariant(v), Type::EnumVariant(e)) => Rc::ptr_eq(v, e),
-            (Type::EnumVariantInstance(v), Type::Enum(e)) => e.has_variant(v.origin()),
+            (Type::EnumVariantInstance(v), Type::EnumInstance(e)) => e.has_variant(v),
             (Type::EnumVariantInstance(v), Type::EnumVariant(e)) => Rc::ptr_eq(v.origin(), e),
             (Type::EnumVariantInstance(v), Type::EnumVariantInstance(e)) => {
                 Rc::ptr_eq(v.origin(), e.origin())
             }
+            (t, Type::Generic(g)) => true,
             _ => false,
         }
     }
 
-    pub fn try_curry(&self) -> Option<Rc<Spanned<Type>>> {
+    pub fn try_curry(&self) -> Option<Rc<RefCell<Type>>> {
         match self {
             Type::Function(f) => Some(f.kind.return_value.clone()),
-            Type::ParenthesisType(t) => t.try_curry(),
-            Type::AnotherType(t) => t.try_curry(),
-            Type::Named(_, t) => t.try_curry(),
+            Type::ParenthesisType(t) => t.borrow().try_curry(),
+            Type::AnotherType(t) => t.borrow().try_curry(),
+            Type::Named(_, t) => t.borrow().try_curry(),
             _ => None,
         }
     }
 
-    pub fn try_curry_with_arg(&self) -> Option<(Rc<Spanned<Type>>, Rc<Spanned<Type>>)> {
+    pub fn try_curry_with_arg(&self) -> Option<(Rc<RefCell<Type>>, Rc<RefCell<Type>>)> {
         match self {
             Type::Function(f) => Some((f.kind.get_value.clone(), f.kind.return_value.clone())),
-            Type::ParenthesisType(t) => t.try_curry_with_arg(),
-            Type::AnotherType(t) => t.try_curry_with_arg(),
-            Type::Named(_, t) => t.try_curry_with_arg(),
+            Type::ParenthesisType(t) => t.borrow().try_curry_with_arg(),
+            Type::AnotherType(t) => t.borrow().try_curry_with_arg(),
+            Type::Named(_, t) => t.borrow().try_curry_with_arg(),
             _ => None,
         }
     }
 
-    pub fn get_return_value(&self) -> &Type {
-        match self {
-            Type::Function(f) => f.kind.return_value.get_return_value(),
-            Type::ParenthesisType(t) => &t,
-            Type::AnotherType(t) => &t,
-            Type::Named(_, t) => t.get_return_value(),
-            t => t,
+    pub fn get_return_value(this: Ref<Type>) -> Ref<Type> {
+        match this.deref() {
+            Type::Function(f) => unsafe {
+                std::mem::transmute(Type::get_return_value(f.kind.return_value.borrow()))
+            },
+            Type::ParenthesisType(t) => unsafe { std::mem::transmute(t.borrow()) },
+            Type::AnotherType(t) => unsafe { std::mem::transmute(t.borrow()) },
+            Type::Named(_, t) => unsafe { std::mem::transmute(t.borrow()) },
+            _ => this,
         }
     }
 
@@ -96,6 +99,20 @@ impl Type {
             Type::Function(_) => true,
             _ => false,
         }
+    }
+
+    pub fn unknown(span: Span) -> Type {
+        Type::Unknown(OneTypeKind {
+            name: None,
+            kind: Spanned::new(Unknown, span),
+        })
+    }
+
+    pub fn type_type() -> Type {
+        Type::Type(OneTypeKind {
+            name: None,
+            kind: Spanned::new(TypeType, Span::new(0, 0)),
+        })
     }
 }
 
@@ -107,16 +124,15 @@ macro_rules! apply_op {
             Type::Unknown(t) => t.$op($value).map(Type::Unknown),
             Type::Function(t) => t.$op($value).map(Type::Function),
             Type::AnotherType(t) => {
-                let mut inner = (***t).clone();
+                let mut inner = t.borrow().clone();
                 inner.remove_name();
                 inner.$op($value)
             }
-            Type::ParenthesisType(mut t) => {
-                t.remove_name();
-                t.$op($value)
-            }
+            Type::ParenthesisType(t) => Ok(Type::ParenthesisType(Rc::new(RefCell::new(
+                t.borrow().deref().clone().$op($value)?,
+            )))),
             Type::Named(_, t) => {
-                let mut inner = (**t).clone();
+                let mut inner = t.borrow().clone();
                 inner.remove_name();
                 inner.$op($value)
             }
@@ -138,6 +154,18 @@ macro_rules! apply_op {
                 e,
                 $value
             )),
+            Type::Generic(g) => Err(format!(
+                "Cannot {} generic type {} to {}",
+                stringify!($op),
+                g,
+                $value
+            )),
+            Type::EnumInstance(e) => Err(format!(
+                "Cannot {} enum instance type {} to {}",
+                stringify!($op),
+                e,
+                $value
+            )),
         }
     };
 }
@@ -149,12 +177,16 @@ impl Display for Type {
             Type::Int(t) => Display::fmt(t, f),
             Type::Type(_) => f.write_str("Type"),
             Type::Unknown(_) => f.write_str("Unknown"),
-            Type::AnotherType(t) => Display::fmt(t, f),
-            Type::ParenthesisType(t) => Display::fmt(t, f),
-            Type::Named(name, def) => f.write_str(&format!("{{{}: {}}}", name, def)),
+            Type::AnotherType(t) => Display::fmt(t.borrow().deref(), f),
+            Type::ParenthesisType(t) => Display::fmt(t.borrow().deref(), f),
+            Type::Named(name, def) => {
+                f.write_str(&format!("{{{}: {}}}", name, def.borrow().deref()))
+            }
             Type::Enum(e) => Display::fmt(e, f),
             Type::EnumVariant(e) => Display::fmt(e, f),
             Type::EnumVariantInstance(e) => Display::fmt(e, f),
+            Type::Generic(g) => Display::fmt(g, f),
+            Type::EnumInstance(e) => Display::fmt(e, f),
         }
     }
 }
@@ -166,12 +198,14 @@ impl Type {
             Type::Type(t) => t.span(),
             Type::Unknown(u) => u.span(),
             Type::Function(t) => t.span(),
-            Type::AnotherType(t) => t.span(),
-            Type::ParenthesisType(t) => t.span(),
-            Type::Named(name, def) => name.span.extend(&def.span),
+            Type::AnotherType(t) => t.borrow().span(),
+            Type::ParenthesisType(t) => t.borrow().span(),
+            Type::Named(name, def) => name.span.extend(&def.borrow().span()),
             Type::Enum(e) => e.span(),
             Type::EnumVariant(e) => e.span(),
             Type::EnumVariantInstance(e) => e.span(),
+            Type::Generic(g) => g.span,
+            Type::EnumInstance(e) => e.span(),
         }
     }
 
@@ -187,6 +221,8 @@ impl Type {
             Type::Enum(_) => unreachable!(),
             Type::EnumVariant(_) => unreachable!(),
             Type::EnumVariantInstance(_) => unreachable!(),
+            Type::Generic(_) => unreachable!(),
+            Type::EnumInstance(_) => unreachable!(),
         }
     }
 
@@ -202,6 +238,8 @@ impl Type {
             Type::Enum(_) => unreachable!(),
             Type::EnumVariant(_) => unreachable!(),
             Type::EnumVariantInstance(_) => unreachable!(),
+            Type::Generic(_) => unreachable!(),
+            Type::EnumInstance(_) => unreachable!(),
         }
     }
 
@@ -247,16 +285,15 @@ impl Type {
             Type::Unknown(t) => t.neg().map(Type::Unknown),
             Type::Function(t) => t.neg().map(Type::Function),
             Type::AnotherType(t) => {
-                let mut inner = (***t).clone();
+                let mut inner = t.borrow().clone();
                 inner.remove_name();
                 inner.neg()
             }
-            Type::ParenthesisType(mut t) => {
-                t.remove_name();
-                t.neg()
-            }
+            Type::ParenthesisType(t) => Ok(Type::ParenthesisType(Rc::new(RefCell::new(
+                t.borrow().deref().clone().neg()?,
+            )))),
             Type::Named(_, t) => {
-                let mut inner = (**t).clone();
+                let mut inner = t.borrow().clone();
                 inner.remove_name();
                 inner.neg()
             }
@@ -265,6 +302,8 @@ impl Type {
             Type::EnumVariantInstance(e) => {
                 Err(format!("Cannot neg enum variant instance type {}", e))
             }
+            Type::Generic(g) => Err(format!("Cannot neg generic type {}", g)),
+            Type::EnumInstance(e) => Err(format!("Cannot enum type {}", e)),
         }
     }
 
@@ -272,47 +311,56 @@ impl Type {
         Ok(self.implication(value))
     }
 
-    fn get_inner(&self) -> Type {
+    pub(crate) fn get_inner_cell(this: &Rc<RefCell<Self>>) -> Rc<RefCell<Type>> {
+        match this.borrow().deref() {
+            Type::AnotherType(t) => Type::get_inner_cell(t),
+            Type::Named(_, n) => Type::get_inner_cell(n),
+            Type::ParenthesisType(t) => Type::get_inner_cell(t),
+            _ => this.clone(),
+        }
+    }
+
+    pub(crate) fn get_inner(&self) -> Type {
         match self {
-            Type::AnotherType(t) => t.get_inner(),
-            Type::Named(_, n) => n.get_inner(),
-            Type::ParenthesisType(t) => t.get_inner(),
+            Type::AnotherType(t) => t.borrow().get_inner(),
+            Type::Named(_, n) => n.borrow().get_inner(),
+            Type::ParenthesisType(t) => t.borrow().get_inner(),
             t => t.clone(),
         }
     }
 
     pub fn count_args(&self) -> u8 {
         match self {
-            Type::Function(t) => 1 + t.kind.return_value.count_args(),
+            Type::Function(t) => 1 + t.kind.return_value.borrow().count_args(),
             _ => 0,
         }
     }
 }
 
-impl Spanned<Type> {
-    pub fn args_types(self: &Rc<Spanned<Type>>) -> Vec<Rc<Spanned<Type>>> {
-        match &***self {
+impl Type {
+    pub fn args_types(this: &Rc<RefCell<Type>>) -> Vec<Rc<RefCell<Type>>> {
+        match this.borrow().deref() {
             Type::Function(t) => {
                 let mut vec = vec![];
                 let f = &t.kind;
                 vec.push(f.get_value.clone());
-                vec.extend(f.return_value.args_types());
+                vec.extend(Type::args_types(&f.return_value));
                 vec
             }
-            _ => vec![self.clone()],
+            _ => vec![this.clone()],
         }
     }
-    pub fn types_in_scope(self: &Rc<Spanned<Type>>) -> Vec<(Spanned<String>, Rc<Spanned<Type>>)> {
+    pub fn types_in_scope(this: &Rc<RefCell<Type>>) -> Vec<(Spanned<String>, Rc<RefCell<Type>>)> {
         let mut types = vec![];
-        match &***self {
-            Type::Named(name, _) => types.push((name.clone(), self.clone())),
+        match this.borrow().deref() {
+            Type::Named(name, _) => types.push((name.clone(), this.clone())),
             Type::Function(f) => {
                 let Function {
                     get_value,
                     return_value,
                 } = &*f.kind;
-                types.append(&mut get_value.types_in_scope());
-                types.append(&mut return_value.types_in_scope());
+                types.append(&mut Type::types_in_scope(get_value));
+                types.append(&mut Type::types_in_scope(return_value));
             }
             _ => {}
         };
@@ -336,8 +384,8 @@ impl Type {
         let span = self.span().extend(&other.span());
         Type::Function(OneTypeKind::from_kind(Spanned::new(
             Function {
-                get_value: Rc::new(Spanned::new(self, span)),
-                return_value: Rc::new(Spanned::new(other, span)),
+                get_value: Rc::new(RefCell::new(self)),
+                return_value: Rc::new(RefCell::new(other)),
             },
             span,
         )))
@@ -367,12 +415,20 @@ impl Type {
                 .as_ref()
                 .map(|s| s.as_str())
                 .unwrap_or("anonymous type"),
-            Type::AnotherType(i) => i.name(),
-            Type::ParenthesisType(t) => t.name(),
+            Type::AnotherType(i) => {
+                let borrowed = i.borrow();
+                unsafe { std::mem::transmute(borrowed.name()) }
+            }
+            Type::ParenthesisType(t) => {
+                let borrowed = t.borrow();
+                unsafe { std::mem::transmute(borrowed.name()) }
+            }
             Type::Named(t, _) => t.as_str(),
             Type::Enum(e) => e.name(),
             Type::EnumVariant(e) => e.name(),
             Type::EnumVariantInstance(e) => e.name(),
+            Type::Generic(g) => &g,
+            Type::EnumInstance(e) => e.name()
         }
     }
 }
@@ -534,14 +590,14 @@ impl TypeOperable<Unknown> for OneTypeKind<Unknown> {
 pub fn parse_type(
     type_def: Spanned<parser::Type>,
     ctx: &Context,
-) -> Result<Rc<Spanned<Type>>, Error> {
+) -> Result<Rc<RefCell<Type>>, Error> {
     let span = type_def.span;
     let parser::Type(name, def) = type_def.inner();
     let name_span = name.span;
     let name = Spanned::new(name.inner().0, name_span);
     let mut t_type = parse_type_helper(def, ctx)?;
     t_type.set_name(name);
-    Ok(Rc::new(Spanned::new(t_type, span)))
+    Ok(Rc::new(RefCell::new(t_type)))
 }
 
 pub fn parse_type_helper(token: Token, ctx: &Context) -> Result<Type, Error> {
@@ -565,22 +621,8 @@ pub fn parse_type_helper(token: Token, ctx: &Context) -> Result<Type, Error> {
             kinds: Spanned::new(VecType::one(Int::Value(i)), token.span),
         })),
         Ast::Parenthesis(t) => {
-            parse_type_helper(*t, ctx).map(|ty| Type::ParenthesisType(Box::new(ty)))
+            parse_type_helper(*t, ctx).map(|ty| Type::ParenthesisType(Rc::new(RefCell::new(ty))))
         }
-        Ast::Ident(i) => match i.0.as_str() {
-            "Int" => Ok(Type::Int(TypeKind::empty(span))),
-            "Type" => Ok(Type::Type(OneTypeKind::from_kind(Spanned::new(
-                TypeType, token.span,
-            )))),
-            name => match ctx.find(name) {
-                Some(o) => Ok(Type::AnotherType(Spanned::new(o.call(), token.span))),
-                _ => Err(Error::Custom(
-                    token.span,
-                    format!("Type {} not found", name),
-                    "-this".to_owned(),
-                )),
-            },
-        },
         Ast::Gr(l, r) => match ((*l), (*r)) {
             (Token { ast: Ast::Val, .. }, a) => get_arithmetic_val(&a)
                 .map(|value| one_bound(OneRangeIntBound::Low(value + 1), span)),
@@ -660,9 +702,14 @@ pub fn parse_type_helper(token: Token, ctx: &Context) -> Result<Type, Error> {
         }),
         Ast::Named(name, def) => Ok(Type::Named(
             Spanned::new(name.0.clone(), name.span),
-            Rc::new(Spanned::new(parse_type_helper(*def, ctx)?, token.span)),
+            Rc::new(RefCell::new(parse_type_helper(*def, ctx)?)),
         )),
-        _ => parse_expr(token, ctx).and_then(|e| e.try_get_type().ok_or(Error::Span(span))),
+        _ => parse_expr(token, ctx).and_then(
+            |e| e.call(span).and_then(
+                |e| e.try_get_type().map(|t|
+                    Type::AnotherType(Spanned::new(t, span))
+                ).ok_or(Error::Span(span))
+            )),
     }
 }
 
