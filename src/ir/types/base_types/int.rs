@@ -1,14 +1,10 @@
-use crate::spanned::AddSpan;
-use crate::spanned::Spanned;
-use crate::types::common::Type;
-use crate::types::vec_type::VecType;
-use crate::types::{TypeKind, TypeOperable};
-use itertools::Itertools;
-use std::cell::RefCell;
-use std::cmp::{max, min};
-use std::fmt::{Display, Formatter};
-use std::ops::Add;
+use crate::common::{Spanned, VecType, AddSpan};
 use std::rc::Rc;
+use std::cell::RefCell;
+use crate::ir::types::{Type, TypeKind, TypeOperable};
+use itertools::Itertools;
+use std::fmt::{Display, Formatter};
+use std::cmp::{max, min};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Int {
@@ -35,7 +31,7 @@ impl Int {
                 Int::Slice(r) => l.from >= r.from && l.to <= r.to && r.step % l.step == 0,
                 _ => false,
             },
-            (l, Int::Slice(r)) => unimplemented!(),
+            (_, Int::Slice(_)) => unimplemented!(),
             _ => {
                 let (minx, maxx) = self.min_and_max();
                 let (miny, maxy) = other.min_and_max();
@@ -626,5 +622,49 @@ impl Slice {
             true => unimplemented!(),
             false => unimplemented!(),
         }
+    }
+}
+
+
+impl VecType<Int> {
+    pub fn try_convert_to_value(self, value: i128) -> Result<Self, String> {
+        self.0
+            .into_iter()
+            .map(|i| i.try_convert_to_value(value.clone()))
+            .collect::<Result<Vec<_>, _>>()
+            .map(|res| res.into_iter().next().unwrap())
+    }
+    pub fn try_add_low_bound(self, value: i128) -> Result<Self, String> {
+        self.0
+            .into_iter()
+            .map(|i| i.try_add_low_bound(value.clone()))
+            .collect::<Result<Vec<_>, _>>()
+            .map(|r| r.into_iter().flatten().collect::<Self>())
+    }
+    pub fn try_add_high_bound(self, value: i128) -> Result<Self, String> {
+        self.0
+            .into_iter()
+            .map(|i| i.try_add_high_bound(value.clone()))
+            .collect::<Result<Vec<_>, _>>()
+            .map(|r| r.into_iter().flatten().collect::<Self>())
+    }
+    pub fn try_add_not_eq_bound(self, value: i128) -> Result<Self, String> {
+        self.0
+            .into_iter()
+            .map(|i| i.try_add_not_eq_bound(value.clone()))
+            .collect::<Result<Vec<_>, _>>()
+            .map(|r| r.into_iter().flatten().collect::<Self>())
+    }
+    pub fn try_add_slice_bound(self, value: Slice) -> Result<Self, String> {
+        self.0
+            .into_iter()
+            .map(|i| i.try_add_slice_bound(value.clone()))
+            .collect::<Result<Vec<_>, _>>()
+            .map(|r| r.into_iter().flatten().collect::<Self>())
+    }
+    pub fn with(self, other: Self) -> Self {
+        let mut vec = self.0;
+        vec.extend_from_slice(other.as_slice());
+        Self(vec)
     }
 }

@@ -1,31 +1,14 @@
-use crate::error::{Error, SpannedError};
-use crate::object::{AllObject, Expr, FunctionObject, Object};
-use crate::spanned::Spanned;
-use crate::types::{Type, TypeType};
-use std::cell::RefCell;
+use crate::ir::objects::{AllObject, FunctionObject};
+use crate::common::{Context, Error, SpannedError};
 use std::ops::Deref;
+use crate::ir::Expr;
 use std::rc::Rc;
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct Context<'a> {
-    pub objects: Vec<AllObject>,
-    pub parent: Option<&'a Context<'a>>,
-}
-
-impl<'a> Context<'a> {
-    pub fn find(&'a self, name: &str) -> Option<&'a AllObject> {
-        let this = self.objects.iter().find(|t| t.name() == name);
-        match (this, self.parent) {
-            (Some(t), _) => Some(t),
-            (_, Some(p)) => p.find(name),
-            _ => None,
-        }
-    }
-}
+use std::cell::RefCell;
+use crate::ir::types::Type;
 
 pub fn type_check_objects<'a>(
     objects: &[AllObject],
-    ctx: Option<&'a Context<'a>>,
+    ctx: Option<&'a Context<'a, AllObject>>,
 ) -> Result<(), Error> {
     let mut ctx = Context {
         objects: vec![],
@@ -44,7 +27,7 @@ pub fn type_check_objects<'a>(
         .collect()
 }
 
-pub fn type_check_function(function: &FunctionObject, top: &Context) -> Result<(), Error> {
+pub fn type_check_function(function: &FunctionObject, top: &Context<'_, AllObject>) -> Result<(), Error> {
     let ctx = function.create_ctx(top);
     let body = function.body.as_ref();
     let return_type = function.get_return_type();
@@ -76,9 +59,9 @@ macro_rules! binary_op {
     }};
 }
 
-pub fn type_check_expr(expr: &Expr, ctx: &Context) -> Result<Rc<RefCell<Type>>, Error> {
+pub fn type_check_expr(expr: &Expr, ctx: &Context<'_, AllObject>) -> Result<Rc<RefCell<Type>>, Error> {
     match expr {
-        Expr::Int(i) => Ok((i.get_type())),
+        Expr::Int(i) => Ok(i.get_type()),
         Expr::Add(l, r) => binary_op!(l, r, ctx, add),
         Expr::Sub(l, r) => binary_op!(l, r, ctx, sub),
         Expr::Object(o) => o.type_check_self(ctx),

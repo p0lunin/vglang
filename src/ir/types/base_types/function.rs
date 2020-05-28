@@ -1,9 +1,8 @@
-use crate::error::Error;
-use crate::types::{OneTypeKind, Type, TypeOperable};
-use std::cell::RefCell;
-use std::fmt::{Display, Formatter};
-use std::ops::Deref;
 use std::rc::Rc;
+use std::cell::RefCell;
+use crate::ir::types::{Type, TypeOperable, OneTypeKind};
+use std::ops::Deref;
+use std::fmt::{Display, Formatter};
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Function {
@@ -34,7 +33,7 @@ impl Display for Function {
 }
 
 impl TypeOperable<Function> for OneTypeKind<Function> {
-    fn add(self, right: Type) -> Result<Self, String> {
+    fn add(self, _: Type) -> Result<Self, String> {
         Err("+ is not allowed for `Function` value".to_owned())
     }
 
@@ -42,27 +41,27 @@ impl TypeOperable<Function> for OneTypeKind<Function> {
         Err("- is not allowed for `Function` value".to_owned())
     }
 
-    fn and(self, right: Type) -> Result<Self, String> {
+    fn and(self, _: Type) -> Result<Self, String> {
         Err("& is not allowed for `Function` value".to_owned())
     }
 
-    fn or(self, right: Type) -> Result<Self, String> {
+    fn or(self, _: Type) -> Result<Self, String> {
         Err("| is not allowed for `Function` value".to_owned())
     }
 
-    fn mul(self, right: Type) -> Result<Self, String> {
+    fn mul(self, _: Type) -> Result<Self, String> {
         Err("* is not allowed for `Function` value".to_owned())
     }
 
-    fn sub(self, right: Type) -> Result<Self, String> {
+    fn sub(self, _: Type) -> Result<Self, String> {
         Err("- is not allowed for `Function` value".to_owned())
     }
 
-    fn div(self, right: Type) -> Result<Self, String> {
+    fn div(self, _: Type) -> Result<Self, String> {
         Err("/ is not allowed for `Function` value".to_owned())
     }
 
-    fn pow(self, right: Type) -> Result<Self, String> {
+    fn pow(self, _: Type) -> Result<Self, String> {
         Err("^ is not allowed for `Function` value".to_owned())
     }
 }

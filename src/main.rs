@@ -1,5 +1,5 @@
 use clap::{App, Arg};
-use fsmcreator::{parse, parse_tokens, peg_error_to_showed, type_check_objects};
+use fsmcreator::{parse_tokens, peg_error_to_showed, type_check_objects, parse_text};
 use std::fs::File;
 use std::io::Read;
 
@@ -32,7 +32,7 @@ fn main() {
     };
     let mut data = String::new();
     file.read_to_string(&mut data).unwrap();
-    let ast = match parse(&data) {
+    let ast = match parse_text(&data) {
         Ok(d) => d,
         Err(e) => {
             println!("{}", peg_error_to_showed(e, &data));

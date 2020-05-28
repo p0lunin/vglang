@@ -1,4 +1,4 @@
-use crate::spanned::Span;
+use crate::common::Span;
 
 fn multiply_str(str: &str, count: usize) -> String {
     let mut string = String::with_capacity(count * str.len());
@@ -99,10 +99,6 @@ impl<'a> ErrorMsgBuilder<'a> {
         self.fill_str(" ", err_line_num_length)
             .add(" | ")
             .fill_str(" ", offset_before_error)
-    }
-    pub fn offset_error_length(self) -> Self {
-        let offset = self.error_size - self.last_added_size - 1;
-        self.fill_str(" ", offset)
     }
 
     pub fn build(self) -> String {

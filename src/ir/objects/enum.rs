@@ -1,17 +1,17 @@
-use crate::error::Error;
-use crate::object::{AllObject, Expr, Object};
-use crate::parser;
-use crate::parser::{EnumDecl, EnumVariantKind};
-use crate::spanned::{Span, Spanned};
-use crate::type_check::{type_check_expr, Context};
-use crate::types::{parse_type_helper, Function, OneTypeKind, Type, TypeType};
-use itertools::repeat_n;
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::HashMap;
-use std::fmt::{Display, Formatter, Write};
+use std::fmt::{Display, Formatter};
 use std::mem;
 use std::ops::Deref;
 use std::rc::Rc;
+use crate::syntax::ast::{EnumDecl, EnumVariantKind};
+use crate::syntax::ast;
+use crate::ir::objects::{AllObject, Object};
+use crate::common::{Span, Error, Context, Spanned};
+use crate::ir::expr::Expr;
+use crate::ir::types::{Type, parse_type_helper, OneTypeKind};
+use crate::ir::type_check::type_check_expr;
+use crate::ir::types::base_types::Function;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Generic {
@@ -26,7 +26,7 @@ pub struct EnumType {
 }
 
 impl EnumType {
-    pub fn from_ast(data: EnumDecl, ctx: &Context) -> Result<Self, Error> {
+    pub fn from_ast(data: EnumDecl, ctx: &Context<'_, AllObject>) -> Result<Self, Error> {
         let generics = data
             .generics
             .iter()
@@ -88,7 +88,7 @@ impl EnumType {
         &self.decl.name
     }
 
-    pub fn call(self: &Rc<Self>, span: Span) -> Result<AllObject, Error> {
+    pub fn call(self: &Rc<Self>) -> Result<AllObject, Error> {
         match self.generics.is_empty() {
             true => Ok(AllObject::EnumInstance(Rc::new(EnumInstance {
                 orig: self.clone(),
@@ -300,7 +300,7 @@ fn create_func_from_types(
 #[derive(Debug, PartialEq, Clone)]
 pub struct EnumVariant {
     enum_name: String,
-    orig: Spanned<parser::EnumVariant>,
+    orig: Spanned<ast::EnumVariant>,
     data: EnumVariantData,
 }
 
@@ -341,7 +341,7 @@ impl EnumVariantInstance {
     }
     pub fn type_check_self(
         self: &Rc<EnumVariantInstance>,
-        ctx: &Context,
+        ctx: &Context<'_, AllObject>,
     ) -> Result<Rc<RefCell<Type>>, Error> {
         self.data
             .iter()
