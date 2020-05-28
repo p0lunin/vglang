@@ -34,8 +34,12 @@ peg::parser! { grammar lang() for str {
         = logic(i)
 
     rule FunctionDef(i: usize) -> Spanned<TopLevelToken>
-        = start:position!() name:ident() _ ":" inli(i) ftype:type_definition(i) new_line() end:position!() {
-            Spanned::new(TopLevelToken::FunctionDef(FunctionDef(name, Box::new(ftype))), Span::new(start, end))
+        = start:position!() name:ident() _ gs:generics(1) _ ":" inli(i) ftype:type_definition(i) new_line() end:position!() {
+            Spanned::new(TopLevelToken::FunctionDef(FunctionDef {
+                name,
+                generics: gs,
+                type_def: Box::new(ftype)
+            }), Span::new(start, end))
         }
 
     rule function_impl(i: usize) -> Spanned<TopLevelToken>
@@ -59,6 +63,14 @@ peg::parser! { grammar lang() for str {
         }
 
     rule generics(i: usize) -> Vec<Spanned<Generic>>
+        = g:generics_inner(i)? {
+            match g {
+                Some(generics) => generics,
+                None => vec![]
+            }
+        }
+
+    rule generics_inner(i: usize) -> Vec<Spanned<Generic>>
         = "<" g:spaced(<generic(i)>) ** "," ">" { g }
 
     rule spaced<T>(r: rule<T>) -> T

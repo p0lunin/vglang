@@ -8,39 +8,41 @@ use std::cell::RefCell;
 use crate::ir::expr::parse_expr;
 use crate::syntax::ast;
 use crate::ir::objects::AllObject;
+use crate::ir::IrContext;
 
 pub fn parse_type(
     type_def: Spanned<ast::Type>,
     ctx: &Context<'_, AllObject>,
+    ir_ctx: &mut IrContext
 ) -> Result<Rc<RefCell<Type>>, Error> {
     let ast::Type(name, def) = type_def.inner();
-    let mut ty = parse_type_helper(def, ctx)?;
+    let mut ty = parse_type_helper(def, ctx, ir_ctx)?;
     ty.set_name(name);
     Ok(Rc::new(RefCell::new(ty)))
 }
 
-pub fn parse_type_helper(token: Token, ctx: &Context<'_, AllObject>) -> Result<Type, Error> {
+pub fn parse_type_helper(token: Token, ctx: &Context<'_, AllObject>, ir_ctx: &mut IrContext) -> Result<Type, Error> {
     let span = token.span;
     match token.ast {
-        Ast::And(l, r) => parse_type_helper(*l, ctx).and_then(|left| {
-            parse_type_helper(*r, ctx).and_then(|right| left.and(right).spanned_err(span))
+        Ast::And(l, r) => parse_type_helper(*l, ctx, ir_ctx).and_then(|left| {
+            parse_type_helper(*r, ctx, ir_ctx).and_then(|right| left.and(right).spanned_err(span))
         }),
-        Ast::Or(l, r) => parse_type_helper(*l, ctx).and_then(|left| {
-            parse_type_helper(*r, ctx).and_then(|right| left.or(right).spanned_err(span))
+        Ast::Or(l, r) => parse_type_helper(*l, ctx, ir_ctx).and_then(|left| {
+            parse_type_helper(*r, ctx, ir_ctx).and_then(|right| left.or(right).spanned_err(span))
         }),
-        Ast::Add(l, r) => parse_type_helper(*l, ctx).and_then(|left| {
-            parse_type_helper(*r, ctx).and_then(|right| left.add(right).spanned_err(span))
+        Ast::Add(l, r) => parse_type_helper(*l, ctx, ir_ctx).and_then(|left| {
+            parse_type_helper(*r, ctx, ir_ctx).and_then(|right| left.add(right).spanned_err(span))
         }),
-        Ast::Sub(l, r) => parse_type_helper(*l, ctx).and_then(|left| {
-            parse_type_helper(*r, ctx).and_then(|right| left.sub(right).spanned_err(span))
+        Ast::Sub(l, r) => parse_type_helper(*l, ctx, ir_ctx).and_then(|left| {
+            parse_type_helper(*r, ctx, ir_ctx).and_then(|right| left.sub(right).spanned_err(span))
         }),
-        Ast::Neg(t) => parse_type_helper(*t, ctx).and_then(|left| left.neg().spanned_err(span)),
+        Ast::Neg(t) => parse_type_helper(*t, ctx, ir_ctx).and_then(|left| left.neg().spanned_err(span)),
         Ast::Int(i) => Ok(Type::Int(TypeKind {
             name: None,
             kinds: Spanned::new(VecType::one(Int::Value(i)), token.span),
         })),
         Ast::Parenthesis(t) => {
-            parse_type_helper(*t, ctx).map(|ty| Type::ParenthesisType(Rc::new(RefCell::new(ty))))
+            parse_type_helper(*t, ctx, ir_ctx).map(|ty| Type::ParenthesisType(Rc::new(RefCell::new(ty))))
         }
         Ast::Gr(l, r) => match ((*l), (*r)) {
             (Token { ast: Ast::Val, .. }, a) => get_arithmetic_val(&a)
@@ -116,14 +118,14 @@ pub fn parse_type_helper(token: Token, ctx: &Context<'_, AllObject>) -> Result<T
                 ))),
             })
         }
-        Ast::Implication(l, r) => parse_type_helper(*l, ctx).and_then(|left| {
-            parse_type_helper(*r, ctx).and_then(|right| left.op_implication(right))
+        Ast::Implication(l, r) => parse_type_helper(*l, ctx, ir_ctx).and_then(|left| {
+            parse_type_helper(*r, ctx, ir_ctx).and_then(|right| left.op_implication(right))
         }),
         Ast::Named(name, def) => Ok(Type::Named(
             name.clone(),
-            Rc::new(RefCell::new(parse_type_helper(*def, ctx)?)),
+            Rc::new(RefCell::new(parse_type_helper(*def, ctx, ir_ctx)?)),
         )),
-        _ => parse_expr(token, ctx).and_then(
+        _ => parse_expr(token, ctx, ir_ctx).and_then(
             |e| e.call().and_then(
                 |e| e.try_get_type().map(|t|
                     Type::AnotherType(Spanned::new(t, span))

@@ -1,11 +1,11 @@
 use crate::syntax::ast::{FunctionDef, FunctionImpl, TopLevelToken};
 use crate::common::{Context, Error, Spanned};
-use crate::ir::objects::{AllObject, Object, Arg, FunctionDefinition, FunctionObject, EnumType};
+use crate::ir::objects::{AllObject, Arg, FunctionDefinition, FunctionObject, EnumType, TypeObject};
 use std::rc::Rc;
 use std::cell::RefCell;
 use crate::ir::types::{parse_type_helper, Type};
 use crate::ir::expr::parse_expr;
-use crate::ir::types;
+use crate::ir::{types, IrContext};
 use std::collections::VecDeque;
 use itertools::Itertools;
 
@@ -13,9 +13,18 @@ pub fn parse_function(
     def: FunctionDef,
     fimpl: FunctionImpl,
     ctx: &Context<'_, AllObject>,
+    ir_ctx: &mut IrContext
 ) -> Result<AllObject, Error> {
-    let FunctionDef(name, def) = def;
-    let func_type = Rc::new(RefCell::new(parse_type_helper(*def, ctx)?));
+    let FunctionDef { name, generics, type_def } = def;
+    let generics = generics.into_iter().map(|g| AllObject::Type(Rc::new(TypeObject {
+        name: g.name.clone(),
+        ttype: Rc::new(RefCell::new(Type::Generic(g.inner().name))),
+    }))).collect();
+    let ctx = Context {
+        objects: generics,
+        parent: Some(&ctx),
+    };
+    let func_type = Rc::new(RefCell::new(parse_type_helper(*type_def, &ctx, ir_ctx)?));
     let count_args = func_type.borrow().count_args();
     let FunctionImpl(impl_name, args, body) = fimpl;
     let arg_types = Type::args_types(&func_type);
@@ -30,18 +39,15 @@ pub fn parse_function(
                 .into_iter()
                 .zip(arg_types.clone().into_iter())
                 .map(|(name, t)| {
-                    Rc::new(Object {
-                        name,
-                        object: Arg { atype: t },
-                    })
+                    Rc::new(Arg { name, atype: t })
                 })
                 .collect::<Vec<_>>();
             let ctx = Context {
                 objects: Type::types_in_scope(&func_type)
                     .into_iter()
-                    .map(|(name, ty)| AllObject::Type(Rc::new(Object { name, object: ty })))
+                    .map(|(name, ty)| AllObject::Type(Rc::new(TypeObject { name, ttype: ty })))
                     .collect(),
-                parent: Some(ctx),
+                parent: Some(&ctx),
             };
             let mut ctx = Context {
                 objects: args.iter().map(|v| AllObject::Arg(v.clone())).collect(),
@@ -52,15 +58,14 @@ pub fn parse_function(
                     name: name.clone(),
                     ftype: func_type.clone(),
                 })));
-            let expr = parse_expr(body.0, &ctx)?;
+            let expr = parse_expr(body.0, &ctx, ir_ctx)?;
 
-            Ok(AllObject::Function(Rc::new(Object {
+            Ok(AllObject::Function(Rc::new(FunctionObject {
                 name,
-                object: FunctionObject {
-                    args,
-                    ftype: func_type,
-                    body: Rc::new(expr),
-                },
+                generics: vec![],
+                args,
+                ftype: func_type,
+                body: Rc::new(expr),
             })))
         }
     }
@@ -97,7 +102,11 @@ fn get_bool_type() -> Rc<Spanned<Type>> {
     initialize_bool().1
 }*/
 
-pub fn parse_tokens<'a>(tokens: Vec<Spanned<TopLevelToken>>) -> Result<Context<'a, AllObject>, Vec<Error>> {
+pub fn parse_tokens<'a>(tokens: Vec<Spanned<TopLevelToken>>) -> Result<(Context<'a, AllObject>, IrContext), Vec<Error>> {
+    let mut ir_ctx = IrContext {
+        specialized_enums: vec![],
+        specialized_functions: vec![],
+    };
     let mut errors = vec![];
     let mut ctx = Context {
         objects: vec![],
@@ -110,43 +119,43 @@ pub fn parse_tokens<'a>(tokens: Vec<Spanned<TopLevelToken>>) -> Result<Context<'
         match token.inner() {
             TopLevelToken::Type(ty) => {
                 let name = ty.0.clone();
-                match types::parse_type(Spanned::new(ty, span), &ctx) {
+                match types::parse_type(Spanned::new(ty, span), &ctx, &mut ir_ctx) {
                     Ok(ty) => ctx
                         .objects
-                        .push(AllObject::Type(Rc::new(Object { name, object: ty }))),
+                        .push(AllObject::Type(Rc::new(TypeObject { name, ttype: ty }))),
                     Err(err) => errors.push(err),
                 }
             }
             TopLevelToken::NewLine | TopLevelToken::Comment => {}
             TopLevelToken::FunctionDef(f) => function_defs.push(f),
             TopLevelToken::FunctionImpl(i) => function_impls.push_front(i),
-            TopLevelToken::EnumDecl(e) => match EnumType::from_ast(e, &ctx) {
+            TopLevelToken::EnumDecl(e) => match EnumType::from_ast(e, &ctx, &mut ir_ctx) {
                 Ok(e) => ctx.objects.push(AllObject::Enum(Rc::new(e))),
                 Err(err) => errors.push(err),
             },
         }
     });
     function_defs.into_iter().for_each(|d| {
-        let (idx, _) = match function_impls.iter().find_position(|i| i.0 == d.0) {
+        let (idx, _) = match function_impls.iter().find_position(|i| i.0 == d.name) {
             Some(d) => d,
             None => {
                 errors.push(Error::Custom(
-                    d.0.span,
-                    format!("Cannot find impl for function {}", d.0),
+                    d.name.span,
+                    format!("Cannot find impl for function {}", d.name),
                     "-here".to_owned(),
                 ));
                 return;
             }
         };
         let fimpl = function_impls.remove(idx).unwrap();
-        match parse_function(d, fimpl, &ctx) {
+        match parse_function(d, fimpl, &ctx, &mut ir_ctx) {
             Ok(o) => ctx.objects.push(o),
             Err(e) => errors.push(e),
         }
     });
 
     if errors.is_empty() {
-        Ok(ctx)
+        Ok((ctx, ir_ctx))
     } else {
         Err(errors)
     }

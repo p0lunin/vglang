@@ -80,7 +80,11 @@ pub struct Slice {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct FunctionDef(pub Spanned<String>, pub Box<Token>);
+pub struct FunctionDef {
+    pub name: Spanned<String>,
+    pub generics: Vec<Spanned<Generic>>,
+    pub type_def: Box<Token>,
+}
 
 #[derive(Debug, PartialEq)]
 pub struct FunctionImpl(

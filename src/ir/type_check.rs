@@ -1,14 +1,17 @@
-use crate::ir::objects::{AllObject, FunctionObject};
-use crate::common::{Context, Error, SpannedError};
+use crate::ir::objects::{AllObject, FunctionObject, FunctionInstanceObject, CurriedFunction, Callable, EnumInstance, monomorphization};
+use crate::common::{Context, Error, SpannedError, Spanned};
 use std::ops::Deref;
-use crate::ir::Expr;
+use crate::ir::{Expr, IrContext};
 use std::rc::Rc;
 use std::cell::RefCell;
-use crate::ir::types::Type;
+use crate::ir::types::{Type, OneTypeKind};
+use std::collections::HashMap;
+use crate::ir::types::base_types::Function;
 
 pub fn type_check_objects<'a>(
     objects: &[AllObject],
     ctx: Option<&'a Context<'a, AllObject>>,
+    ir_ctx: &mut IrContext,
 ) -> Result<(), Error> {
     let mut ctx = Context {
         objects: vec![],
@@ -19,7 +22,7 @@ pub fn type_check_objects<'a>(
         .map(|object| match object {
             AllObject::Function(f) => {
                 ctx.objects.push(AllObject::Function(f.clone()));
-                type_check_function(&f.object, &ctx)?;
+                type_check_function(&f, &ctx, ir_ctx)?;
                 Ok(())
             }
             _ => Ok(()),
@@ -27,11 +30,11 @@ pub fn type_check_objects<'a>(
         .collect()
 }
 
-pub fn type_check_function(function: &FunctionObject, top: &Context<'_, AllObject>) -> Result<(), Error> {
+pub fn type_check_function(function: &FunctionObject, top: &Context<'_, AllObject>, ir_ctx: &mut IrContext) -> Result<(), Error> {
     let ctx = function.create_ctx(top);
     let body = function.body.as_ref();
     let return_type = function.get_return_type();
-    let res_type = type_check_expr(body, &ctx)?;
+    let res_type = type_check_expr(body, &ctx, ir_ctx)?;
     let borrowed = res_type.borrow();
     match borrowed.is_part_of(return_type.deref()) {
         true => Ok(()),
@@ -44,9 +47,9 @@ pub fn type_check_function(function: &FunctionObject, top: &Context<'_, AllObjec
 }
 
 macro_rules! binary_op {
-    ($l:tt, $r:tt, $ctx:tt, $op:tt) => {{
-        let left = type_check_expr($l.as_ref(), $ctx)?;
-        let right = type_check_expr($r.as_ref(), $ctx)?;
+    ($l:tt, $r:tt, $ctx:tt, $ir_ctx:tt, $op:tt) => {{
+        let left = type_check_expr($l.as_ref(), $ctx, $ir_ctx)?;
+        let right = type_check_expr($r.as_ref(), $ctx, $ir_ctx)?;
         let new_span = left.borrow().span().extend(&right.borrow().span());
         let left_br = left.borrow();
         let right_br = left.borrow();
@@ -59,15 +62,15 @@ macro_rules! binary_op {
     }};
 }
 
-pub fn type_check_expr(expr: &Expr, ctx: &Context<'_, AllObject>) -> Result<Rc<RefCell<Type>>, Error> {
+pub fn type_check_expr(expr: &Expr, ctx: &Context<'_, AllObject>, ir_ctx: &mut IrContext) -> Result<Rc<RefCell<Type>>, Error> {
     match expr {
         Expr::Int(i) => Ok(i.get_type()),
-        Expr::Add(l, r) => binary_op!(l, r, ctx, add),
-        Expr::Sub(l, r) => binary_op!(l, r, ctx, sub),
-        Expr::Object(o) => o.type_check_self(ctx),
-        Expr::Mul(l, r) => binary_op!(l, r, ctx, mul),
-        Expr::Div(l, r) => binary_op!(l, r, ctx, div),
-        Expr::Pow(l, r) => binary_op!(l, r, ctx, pow),
+        Expr::Add(l, r) => binary_op!(l, r, ctx, ir_ctx, add),
+        Expr::Sub(l, r) => binary_op!(l, r, ctx, ir_ctx, sub),
+        Expr::Object(o) => type_check_object(o, ctx, ir_ctx),
+        Expr::Mul(l, r) => binary_op!(l, r, ctx, ir_ctx, mul),
+        Expr::Div(l, r) => binary_op!(l, r, ctx, ir_ctx, div),
+        Expr::Pow(l, r) => binary_op!(l, r, ctx, ir_ctx, pow),
         Expr::And(_, _) => unimplemented!(),
         Expr::Or(_, _) => unimplemented!(),
         Expr::Gr(_, _) => unimplemented!(),
@@ -76,10 +79,105 @@ pub fn type_check_expr(expr: &Expr, ctx: &Context<'_, AllObject>) -> Result<Rc<R
         Expr::GrOrEq(_, _) => unimplemented!(),
         Expr::Le(_, _) => unimplemented!(),
         Expr::LeOrEq(_, _) => unimplemented!(),
-        Expr::Neg(e) => type_check_expr(&e, ctx).and_then(|ty| {
+        Expr::Neg(e) => type_check_expr(&e, ctx, ir_ctx).and_then(|ty| {
             Ok(Rc::new(RefCell::new(
                 ty.borrow().clone().neg().spanned_err(e.span())?,
             )))
         }),
+    }
+}
+
+fn type_check_object(obj: &Spanned<AllObject>, ctx: &Context<'_, AllObject>, ir_ctx: &mut IrContext) -> Result<Rc<RefCell<Type>>, Error> {
+    match &obj.val {
+        AllObject::EnumVariantInstance(v) => v.type_check_self(ctx, ir_ctx),
+        AllObject::CurriedFunction(f) => {
+            monomorphize_function(f, ctx, ir_ctx)
+                .map(|o| {
+                    o.ftype.clone()
+                })
+        }
+        o => Ok(o.get_type())
+    }
+}
+
+fn monomorphize_function(function: &Rc<CurriedFunction>, ctx: &Context<'_, AllObject>, ir_ctx: &mut IrContext) -> Result<Rc<FunctionInstanceObject>, Error> {
+    let mut generics = HashMap::<String, Rc<RefCell<Type>>>::new();
+    generics.extend(helper(&function.orig.ftype(), &function.scope, ctx, ir_ctx)?);
+    let inst = FunctionInstanceObject {
+        orig: function.orig.clone(),
+        ftype: monomorphize_type(&function.ftype, &generics, ctx, ir_ctx)?,
+    };
+    Ok(ir_ctx.create_specialized_function(inst))
+}
+
+fn helper(ty: &Rc<RefCell<Type>>, exprs: &[Expr], ctx: &Context<'_, AllObject>, ir_ctx: &mut IrContext) -> Result<Vec<(String, Rc<RefCell<Type>>)>, Error> {
+    match (ty.borrow().deref(), exprs) {
+        (Type::Function(f), [x, xs @ ..]) => {
+            let mut generics = match f.kind.get_value.borrow().deref() {
+                Type::Generic(g) => vec![(g.clone().inner(), type_check_expr(x, ctx, ir_ctx)?)],
+                Type::AnotherType(t) => match t.borrow().deref() {
+                    Type::Generic(g) => vec![(g.clone().inner(), type_check_expr(x, ctx, ir_ctx)?)],
+                    _ => vec![]
+                }
+                _ => vec![],
+            };
+            helper(&f.kind.return_value, xs, ctx, ir_ctx)
+                .map(|mut res| {
+                    res.append(&mut generics);
+                    res
+                })
+        }
+        (Type::Generic(g), [x]) => Ok(vec![
+            (g.clone().inner(), type_check_expr(x, ctx, ir_ctx)?)
+        ]),
+        (t, [x]) => match x.try_get_type().unwrap().borrow().is_part_of(t) {
+            true => Ok(vec![]),
+            false => Err(Error::Span(x.span()))
+        }
+        (t, []) => Ok(vec![]),
+        res => {
+            //dbg!(res);
+            unreachable!()
+        },
+    }
+}
+
+fn monomorphize_type(ty: &Rc<RefCell<Type>>, generics: &HashMap<String, Rc<RefCell<Type>>>, ctx: &Context<'_, AllObject>, ir_ctx: &mut IrContext) -> Result<Rc<RefCell<Type>>, Error> {
+    match ty.borrow().deref() {
+        Type::Generic(g) => match generics.get(g.as_str()) {
+            Some(t) => Ok(t.clone()),
+            None => unimplemented!(),
+        },
+        Type::Function(f) => {
+            let get_value = monomorphize_type(&f.kind.get_value, generics, ctx, ir_ctx)?;
+            let return_value = monomorphize_type(&f.kind.get_value, generics, ctx, ir_ctx)?;
+            Ok(Rc::new(RefCell::new(Type::Function(OneTypeKind {
+                name: f.name.clone(),
+                kind: Spanned::new(Function {
+                    get_value,
+                    return_value,
+                }, f.kind.span),
+            }))))
+        }
+        Type::EnumInstance(e) => {
+            match e.generics.is_empty() {
+                true => Ok(ty.clone()),
+                false => {
+                    let inst = EnumInstance {
+                        orig: e.orig.clone(),
+                        generics: monomorphization(e.generics.iter(), generics),
+                        variants: e.variants.clone(), // TODO: monomorh this
+                    };
+                    Ok(ir_ctx.create_specialized_enum(inst).call())
+                }
+            }
+        }
+        Type::AnotherType(t) => {
+            monomorphize_type(&t.val, generics, ctx, ir_ctx)
+        }
+        Type::ParenthesisType(t) => {
+            monomorphize_type(&t, generics, ctx, ir_ctx)
+        }
+        _ => Ok(ty.clone())
     }
 }

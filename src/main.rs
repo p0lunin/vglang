@@ -39,7 +39,7 @@ fn main() {
             return;
         }
     };
-    let ctx = match parse_tokens(ast) {
+    let (ctx, mut ir_ctx) = match parse_tokens(ast) {
         Ok(t) => t,
         Err(errs) => {
             errs.into_iter()
@@ -47,7 +47,7 @@ fn main() {
             return;
         }
     };
-    match type_check_objects(&ctx.objects, Some(&ctx)) {
+    match type_check_objects(&ctx.objects, Some(&ctx), &mut ir_ctx) {
         Err(e) => {
             println!("{}", e.display(&data));
             return;

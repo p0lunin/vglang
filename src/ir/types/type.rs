@@ -6,6 +6,7 @@ use std::cell::{RefCell, Ref};
 use crate::common::{Spanned, Span, Error};
 use std::ops::Deref;
 use std::fmt::{Display, Formatter};
+use std::collections::HashMap;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Type {
@@ -49,6 +50,8 @@ impl Type {
             (Type::EnumVariantInstance(v), Type::EnumVariantInstance(e)) => {
                 Rc::ptr_eq(v.origin(), e.origin())
             }
+            (Type::EnumInstance(e), Type::EnumInstance(v)) => e.is_part_of(v),
+            (Type::Generic(l), Type::Generic(r)) => l.as_str() == r.as_str(),
             (_, Type::Generic(_)) => true,
             _ => false,
         }
@@ -90,6 +93,22 @@ impl Type {
         match self {
             Type::Function(_) => true,
             _ => false,
+        }
+    }
+
+    pub fn monomorhize(this: &Rc<RefCell<Type>>, generics: &HashMap<String, Rc<RefCell<Type>>>) -> Rc<RefCell<Type>> {
+        match this.borrow().deref() {
+            Type::Function(f) => {
+                Rc::new(RefCell::new(Type::Function(OneTypeKind {
+                    name: f.name.clone(),
+                    kind: Spanned::new(Function {
+                        get_value: Type::monomorhize(&f.kind.get_value, generics),
+                        return_value: Type::monomorhize(&f.kind.return_value, generics),
+                    }, f.kind.span),
+                })))
+            }
+            Type::Generic(g) => generics.get(g.as_str()).unwrap().clone(),
+            _ => this.clone()
         }
     }
 

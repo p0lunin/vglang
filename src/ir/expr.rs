@@ -1,10 +1,11 @@
 use crate::common::{Spanned, Span, VecType, Error, Context, AddSpan};
-use crate::ir::objects::{AllObject, Object};
+use crate::ir::objects::{AllObject, TypeObject};
 use std::rc::Rc;
 use std::cell::RefCell;
 use crate::ir::types::{Type, TypeKind};
 use crate::ir::types::base_types::Int;
 use crate::syntax::ast::{Token, Ast};
+use crate::ir::IrContext;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Expr {
@@ -124,19 +125,19 @@ impl Expr {
     }
 }
 
-pub fn parse_expr(token: Token, ctx: &Context<'_, AllObject>) -> Result<Expr, Error> {
+pub fn parse_expr(token: Token, ctx: &Context<'_, AllObject>, ir_ctx: &mut IrContext) -> Result<Expr, Error> {
     match token.ast {
         Ast::Int(i) => Ok(Expr::Int(Spanned::new(i, token.span))),
-        Ast::Add(l, r) => Ok(parse_expr(*l, ctx)?.add(parse_expr(*r, ctx)?)),
-        Ast::Sub(l, r) => Ok(parse_expr(*l, ctx)?.sub(parse_expr(*r, ctx)?)),
+        Ast::Add(l, r) => Ok(parse_expr(*l, ctx, ir_ctx)?.add(parse_expr(*r, ctx, ir_ctx)?)),
+        Ast::Sub(l, r) => Ok(parse_expr(*l, ctx, ir_ctx)?.sub(parse_expr(*r, ctx, ir_ctx)?)),
         Ast::Ident(i) => match i.as_ref() {
-            "Int" => Ok(Expr::Object(Spanned::new(AllObject::Type(Rc::new(Object {
+            "Int" => Ok(Expr::Object(Spanned::new(AllObject::Type(Rc::new(TypeObject {
                 name: Spanned::new("".to_owned(), token.span),
-                object: Rc::new(RefCell::new(Type::Int(TypeKind::empty(token.span)))),
+                ttype: Rc::new(RefCell::new(Type::Int(TypeKind::empty(token.span)))),
             })), token.span))),
-            "Type" => Ok(Expr::Object(Spanned::new(AllObject::Type(Rc::new(Object {
+            "Type" => Ok(Expr::Object(Spanned::new(AllObject::Type(Rc::new(TypeObject {
                 name: Spanned::new("".to_owned(), token.span),
-                object: Rc::new(RefCell::new(Type::type_type())),
+                ttype: Rc::new(RefCell::new(Type::type_type())),
             })), token.span))),
             name => match ctx.find(name) {
                 Some(o) => Ok(Expr::Object(o.clone().add_span(token.span))),
@@ -148,18 +149,18 @@ pub fn parse_expr(token: Token, ctx: &Context<'_, AllObject>) -> Result<Expr, Er
             }
         },
         Ast::CallFunction(func, arg) => {
-            let left_expr = parse_expr(*func, ctx)?;
-            let arg_expr = parse_expr(*arg, ctx)?;
+            let left_expr = parse_expr(*func, ctx, ir_ctx)?;
+            let arg_expr = parse_expr(*arg, ctx, ir_ctx)?;
             match left_expr {
                 Expr::Object(o) => Ok(Expr::Object(
-                    o.call_with_arg_expr(arg_expr, token.span)?
+                    o.call_with_arg_expr(arg_expr, ir_ctx, token.span)?
                         .add_span(token.span),
                 )),
                 _ => Err(Error::Span(token.span)),
             }
         }
         Ast::Dot(l, r) => {
-            let left_expr = parse_expr(*l, ctx)?;
+            let left_expr = parse_expr(*l, ctx, ir_ctx)?;
             let right_expr = match r.ast {
                 Ast::Ident(i) => i,
                 _ => return Err(Error::Span(r.span)),
@@ -173,19 +174,19 @@ pub fn parse_expr(token: Token, ctx: &Context<'_, AllObject>) -> Result<Expr, Er
                 _ => Err(Error::Span(span)),
             }
         }
-        Ast::Parenthesis(p) => parse_expr(*p, ctx),
-        Ast::Mul(l, r) => Ok(parse_expr(*l, ctx)?.mul(parse_expr(*r, ctx)?)),
-        Ast::Div(l, r) => Ok(parse_expr(*l, ctx)?.div(parse_expr(*r, ctx)?)),
-        Ast::Pow(l, r) => Ok(parse_expr(*l, ctx)?.pow(parse_expr(*r, ctx)?)),
-        Ast::And(l, r) => Ok(parse_expr(*l, ctx)?.and(parse_expr(*r, ctx)?)),
-        Ast::Or(l, r) => Ok(parse_expr(*l, ctx)?.or(parse_expr(*r, ctx)?)),
-        Ast::Gr(l, r) => Ok(parse_expr(*l, ctx)?.gr(parse_expr(*r, ctx)?)),
-        Ast::Le(l, r) => Ok(parse_expr(*l, ctx)?.le(parse_expr(*r, ctx)?)),
-        Ast::GrEq(l, r) => Ok(parse_expr(*l, ctx)?.gr_or_eq(parse_expr(*r, ctx)?)),
-        Ast::LeEq(l, r) => Ok(parse_expr(*l, ctx)?.le_or_eq(parse_expr(*r, ctx)?)),
-        Ast::Eq(l, r) => Ok(parse_expr(*l, ctx)?.eq(parse_expr(*r, ctx)?)),
-        Ast::NotEq(l, r) => Ok(parse_expr(*l, ctx)?.not_eq(parse_expr(*r, ctx)?)),
-        Ast::Neg(t) => Ok(parse_expr(*t, ctx)?.neg()),
+        Ast::Parenthesis(p) => parse_expr(*p, ctx, ir_ctx),
+        Ast::Mul(l, r) => Ok(parse_expr(*l, ctx, ir_ctx)?.mul(parse_expr(*r, ctx, ir_ctx)?)),
+        Ast::Div(l, r) => Ok(parse_expr(*l, ctx, ir_ctx)?.div(parse_expr(*r, ctx, ir_ctx)?)),
+        Ast::Pow(l, r) => Ok(parse_expr(*l, ctx, ir_ctx)?.pow(parse_expr(*r, ctx, ir_ctx)?)),
+        Ast::And(l, r) => Ok(parse_expr(*l, ctx, ir_ctx)?.and(parse_expr(*r, ctx, ir_ctx)?)),
+        Ast::Or(l, r) => Ok(parse_expr(*l, ctx, ir_ctx)?.or(parse_expr(*r, ctx, ir_ctx)?)),
+        Ast::Gr(l, r) => Ok(parse_expr(*l, ctx, ir_ctx)?.gr(parse_expr(*r, ctx, ir_ctx)?)),
+        Ast::Le(l, r) => Ok(parse_expr(*l, ctx, ir_ctx)?.le(parse_expr(*r, ctx, ir_ctx)?)),
+        Ast::GrEq(l, r) => Ok(parse_expr(*l, ctx, ir_ctx)?.gr_or_eq(parse_expr(*r, ctx, ir_ctx)?)),
+        Ast::LeEq(l, r) => Ok(parse_expr(*l, ctx, ir_ctx)?.le_or_eq(parse_expr(*r, ctx, ir_ctx)?)),
+        Ast::Eq(l, r) => Ok(parse_expr(*l, ctx, ir_ctx)?.eq(parse_expr(*r, ctx, ir_ctx)?)),
+        Ast::NotEq(l, r) => Ok(parse_expr(*l, ctx, ir_ctx)?.not_eq(parse_expr(*r, ctx, ir_ctx)?)),
+        Ast::Neg(t) => Ok(parse_expr(*t, ctx, ir_ctx)?.neg()),
         Ast::Double(_) => unimplemented!(),
         Ast::Val => Err(Error::Span(token.span)),
         Ast::Slice(_) => unimplemented!(),

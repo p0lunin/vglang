@@ -1,0 +1,10 @@
+enum Either<T, U>
+    Left T
+    Right U
+
+
+foo<T, U>: T -> U -> (Either # T # U)
+foo x y = Either.Left # x
+
+bar: Int -> (Either # Int # Int)
+bar x = foo # x # 1
