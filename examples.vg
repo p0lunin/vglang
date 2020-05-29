@@ -8,3 +8,10 @@ foo x y = Either.Left # x
 
 bar: Int -> (Either # Int # Int)
 bar x = foo # x # 1
+
+enum List<T>
+    Nil
+    Cons (T) (List T)
+
+foo<T>: T -> (List # T)
+foo t = List.Cons # t # (List.Cons # t # List.Nil)

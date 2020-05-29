@@ -1,5 +1,5 @@
-use crate::common::Span;
 use crate::common::error_builder::ErrorMsgBuilder;
+use crate::common::Span;
 
 pub trait SpannedError<T> {
     fn spanned_err(self, span: Span) -> Result<T, Error>;

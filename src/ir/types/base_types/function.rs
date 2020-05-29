@@ -1,8 +1,8 @@
-use std::rc::Rc;
+use crate::ir::types::{OneTypeKind, Type, TypeOperable};
 use std::cell::RefCell;
-use crate::ir::types::{Type, TypeOperable, OneTypeKind};
-use std::ops::Deref;
 use std::fmt::{Display, Formatter};
+use std::ops::Deref;
+use std::rc::Rc;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Function {

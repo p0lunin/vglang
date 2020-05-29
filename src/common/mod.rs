@@ -1,12 +1,12 @@
 mod context;
-mod vec_type;
 mod error;
 mod error_builder;
 mod spanned;
+mod vec_type;
 
 pub use self::{
     context::{Context, HasName},
-    vec_type::VecType,
     error::*,
-    spanned::{Span, Spanned, AddSpan},
+    spanned::{AddSpan, Span, Spanned},
+    vec_type::VecType,
 };

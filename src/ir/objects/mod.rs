@@ -1,11 +1,6 @@
-mod r#enum;
 mod allobject;
-mod function;
 mod common;
+mod r#enum;
+mod function;
 
-pub use self::{
-    r#enum::*,
-    allobject::*,
-    function::*,
-    common::*,
-};
+pub use self::{allobject::*, common::*, function::*, r#enum::*};

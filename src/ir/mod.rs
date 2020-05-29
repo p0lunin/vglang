@@ -1,5 +1,5 @@
-pub mod objects;
 mod expr;
+pub mod objects;
 mod transform;
 mod type_check;
 pub mod types;
@@ -21,19 +21,24 @@ pub struct IrContext {
 
 impl IrContext {
     pub fn create_specialized_enum(&mut self, inst: EnumInstance) -> Rc<EnumInstance> {
-        self.specialized_enums.iter().find(|i| {
-            i.as_ref() == &inst
-        }).map(|r| r.clone())
+        self.specialized_enums
+            .iter()
+            .find(|i| i.as_ref() == &inst)
+            .map(|r| r.clone())
             .unwrap_or_else(|| {
                 let enum_inst = Rc::new(inst);
                 self.specialized_enums.push(enum_inst.clone());
                 enum_inst
             })
     }
-    pub fn create_specialized_function(&mut self, inst: FunctionInstanceObject) -> Rc<FunctionInstanceObject> {
-        self.specialized_functions.iter().find(|i| {
-            i.as_ref() == &inst
-        }).map(|r| r.clone())
+    pub fn create_specialized_function(
+        &mut self,
+        inst: FunctionInstanceObject,
+    ) -> Rc<FunctionInstanceObject> {
+        self.specialized_functions
+            .iter()
+            .find(|i| i.as_ref() == &inst)
+            .map(|r| r.clone())
             .unwrap_or_else(|| {
                 let f_inst = Rc::new(inst);
                 self.specialized_functions.push(f_inst.clone());

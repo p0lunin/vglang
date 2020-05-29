@@ -1,6 +1,6 @@
 use crate::{
+    common::{Span, Spanned},
     syntax::ast::*,
-    common::{Spanned, Span},
 };
 
 peg::parser! { grammar lang() for str {

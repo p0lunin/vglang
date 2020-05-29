@@ -1,9 +1,9 @@
 use crate::common::Spanned;
 use crate::ir::objects::AllObject;
-use std::cell::RefCell;
-use std::rc::Rc;
 use crate::ir::types::Type;
+use std::cell::RefCell;
 use std::fmt::{Display, Formatter};
+use std::rc::Rc;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Arg {

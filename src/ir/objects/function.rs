@@ -1,19 +1,19 @@
-use std::rc::Rc;
-use std::cell::{RefCell, Ref};
-use crate::ir::types::Type;
+use crate::common::{Context, Spanned};
 use crate::ir::expr::Expr;
-use crate::common::{Spanned, Context};
-use crate::ir::objects::{Arg, AllObject};
-use std::fmt::{Display, Formatter};
+use crate::ir::objects::{AllObject, Arg};
+use crate::ir::types::Type;
+use std::cell::{Ref, RefCell};
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
 use std::ops::Deref;
+use std::rc::Rc;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct CurriedFunction {
     pub ftype: Rc<RefCell<Type>>,
     pub scope: Vec<Expr>,
     pub orig: Callable,
-    pub instance: RefCell<Option<Rc<FunctionInstanceObject>>>
+    pub instance: RefCell<Option<Rc<FunctionInstanceObject>>>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -76,7 +76,10 @@ impl FunctionObject {
             .collect()
     }
 
-    pub fn monomorphize(self: &Rc<Self>, generics: &HashMap<String, Rc<RefCell<Type>>>) -> FunctionInstanceObject {
+    pub fn monomorphize(
+        self: &Rc<Self>,
+        generics: &HashMap<String, Rc<RefCell<Type>>>,
+    ) -> FunctionInstanceObject {
         FunctionInstanceObject {
             orig: Callable::Func(self.clone()),
             ftype: monomorphize_type(&self.ftype, generics),
@@ -84,10 +87,13 @@ impl FunctionObject {
     }
 }
 
-fn monomorphize_type(ty: &Rc<RefCell<Type>>, generics: &HashMap<String, Rc<RefCell<Type>>>) -> Rc<RefCell<Type>> {
+fn monomorphize_type(
+    ty: &Rc<RefCell<Type>>,
+    generics: &HashMap<String, Rc<RefCell<Type>>>,
+) -> Rc<RefCell<Type>> {
     match Type::get_inner_cell(ty).borrow().deref() {
         Type::Generic(n) => generics.get(n.as_str()).unwrap().clone(),
-        _ => ty.clone()
+        _ => ty.clone(),
     }
 }
 

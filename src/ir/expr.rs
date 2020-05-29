@@ -1,11 +1,11 @@
-use crate::common::{Spanned, Span, VecType, Error, Context, AddSpan};
+use crate::common::{AddSpan, Context, Error, Span, Spanned, VecType};
 use crate::ir::objects::{AllObject, TypeObject};
-use std::rc::Rc;
-use std::cell::RefCell;
-use crate::ir::types::{Type, TypeKind};
 use crate::ir::types::base_types::Int;
-use crate::syntax::ast::{Token, Ast};
+use crate::ir::types::{Type, TypeKind};
 use crate::ir::IrContext;
+use crate::syntax::ast::{Ast, Token};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Expr {
@@ -109,10 +109,9 @@ impl Expr {
     }
     pub fn try_get_type(&self) -> Option<Rc<RefCell<Type>>> {
         match self {
-            Expr::Int(i) => Some(Rc::new(RefCell::new(Type::Int(TypeKind::from_kinds(Spanned::new(
-                VecType::one(Int::Value(**i)),
-                i.span,
-            )))))),
+            Expr::Int(i) => Some(Rc::new(RefCell::new(Type::Int(TypeKind::from_kinds(
+                Spanned::new(VecType::one(Int::Value(**i)), i.span),
+            ))))),
             Expr::Object(o) => Some(o.get_type().clone()),
             _ => None,
         }
@@ -120,33 +119,46 @@ impl Expr {
     pub fn call(self) -> Result<Self, Error> {
         match self {
             Expr::Object(o) => Ok(Expr::Object(Spanned::new(o.call()?, o.span))),
-            e => Ok(e)
+            e => Ok(e),
         }
     }
 }
 
-pub fn parse_expr(token: Token, ctx: &Context<'_, AllObject>, ir_ctx: &mut IrContext) -> Result<Expr, Error> {
+pub fn parse_expr(
+    token: Token,
+    ctx: &Context<'_, AllObject>,
+    ir_ctx: &mut IrContext,
+) -> Result<Expr, Error> {
     match token.ast {
         Ast::Int(i) => Ok(Expr::Int(Spanned::new(i, token.span))),
         Ast::Add(l, r) => Ok(parse_expr(*l, ctx, ir_ctx)?.add(parse_expr(*r, ctx, ir_ctx)?)),
         Ast::Sub(l, r) => Ok(parse_expr(*l, ctx, ir_ctx)?.sub(parse_expr(*r, ctx, ir_ctx)?)),
         Ast::Ident(i) => match i.as_ref() {
-            "Int" => Ok(Expr::Object(Spanned::new(AllObject::Type(Rc::new(TypeObject {
-                name: Spanned::new("".to_owned(), token.span),
-                ttype: Rc::new(RefCell::new(Type::Int(TypeKind::empty(token.span)))),
-            })), token.span))),
-            "Type" => Ok(Expr::Object(Spanned::new(AllObject::Type(Rc::new(TypeObject {
-                name: Spanned::new("".to_owned(), token.span),
-                ttype: Rc::new(RefCell::new(Type::type_type())),
-            })), token.span))),
+            "Int" => Ok(Expr::Object(Spanned::new(
+                AllObject::Type(Rc::new(TypeObject {
+                    name: Spanned::new("".to_owned(), token.span),
+                    ttype: Rc::new(RefCell::new(Type::Int(TypeKind::empty(token.span)))),
+                })),
+                token.span,
+            ))),
+            "Type" => Ok(Expr::Object(Spanned::new(
+                AllObject::Type(Rc::new(TypeObject {
+                    name: Spanned::new("".to_owned(), token.span),
+                    ttype: Rc::new(RefCell::new(Type::type_type())),
+                })),
+                token.span,
+            ))),
             name => match ctx.find(name) {
-                Some(o) => Ok(Expr::Object(o.clone().add_span(token.span))),
+                Some(o) => {
+                    let o_cloned = o.clone();
+                    Ok(Expr::Object(o_cloned.add_span(token.span)))
+                }
                 _ => Err(Error::Custom(
                     token.span,
                     format!("{} not found", i),
                     "-here".to_owned(),
                 )),
-            }
+            },
         },
         Ast::CallFunction(func, arg) => {
             let left_expr = parse_expr(*func, ctx, ir_ctx)?;

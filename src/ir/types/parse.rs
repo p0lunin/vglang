@@ -1,19 +1,19 @@
-use crate::syntax::ast::{Token, Ast};
-use crate::common::{Span, Spanned, VecType, Error, Context, SpannedError};
-use std::convert::TryFrom;
-use crate::ir::types::base_types::{OneRangeIntBound, Int, Slice};
-use crate::ir::types::{Type, TypeKind};
-use std::rc::Rc;
-use std::cell::RefCell;
+use crate::common::{Context, Error, Span, Spanned, SpannedError, VecType};
 use crate::ir::expr::parse_expr;
-use crate::syntax::ast;
 use crate::ir::objects::AllObject;
+use crate::ir::types::base_types::{Int, OneRangeIntBound, Slice};
+use crate::ir::types::{Type, TypeKind};
 use crate::ir::IrContext;
+use crate::syntax::ast;
+use crate::syntax::ast::{Ast, Token};
+use std::cell::RefCell;
+use std::convert::TryFrom;
+use std::rc::Rc;
 
 pub fn parse_type(
     type_def: Spanned<ast::Type>,
     ctx: &Context<'_, AllObject>,
-    ir_ctx: &mut IrContext
+    ir_ctx: &mut IrContext,
 ) -> Result<Rc<RefCell<Type>>, Error> {
     let ast::Type(name, def) = type_def.inner();
     let mut ty = parse_type_helper(def, ctx, ir_ctx)?;
@@ -21,7 +21,11 @@ pub fn parse_type(
     Ok(Rc::new(RefCell::new(ty)))
 }
 
-pub fn parse_type_helper(token: Token, ctx: &Context<'_, AllObject>, ir_ctx: &mut IrContext) -> Result<Type, Error> {
+pub fn parse_type_helper(
+    token: Token,
+    ctx: &Context<'_, AllObject>,
+    ir_ctx: &mut IrContext,
+) -> Result<Type, Error> {
     let span = token.span;
     match token.ast {
         Ast::And(l, r) => parse_type_helper(*l, ctx, ir_ctx).and_then(|left| {
@@ -36,14 +40,15 @@ pub fn parse_type_helper(token: Token, ctx: &Context<'_, AllObject>, ir_ctx: &mu
         Ast::Sub(l, r) => parse_type_helper(*l, ctx, ir_ctx).and_then(|left| {
             parse_type_helper(*r, ctx, ir_ctx).and_then(|right| left.sub(right).spanned_err(span))
         }),
-        Ast::Neg(t) => parse_type_helper(*t, ctx, ir_ctx).and_then(|left| left.neg().spanned_err(span)),
+        Ast::Neg(t) => {
+            parse_type_helper(*t, ctx, ir_ctx).and_then(|left| left.neg().spanned_err(span))
+        }
         Ast::Int(i) => Ok(Type::Int(TypeKind {
             name: None,
             kinds: Spanned::new(VecType::one(Int::Value(i)), token.span),
         })),
-        Ast::Parenthesis(t) => {
-            parse_type_helper(*t, ctx, ir_ctx).map(|ty| Type::ParenthesisType(Rc::new(RefCell::new(ty))))
-        }
+        Ast::Parenthesis(t) => parse_type_helper(*t, ctx, ir_ctx)
+            .map(|ty| Type::ParenthesisType(Rc::new(RefCell::new(ty)))),
         Ast::Gr(l, r) => match ((*l), (*r)) {
             (Token { ast: Ast::Val, .. }, a) => get_arithmetic_val(&a)
                 .map(|value| one_bound(OneRangeIntBound::Low(value + 1), span)),
@@ -125,12 +130,13 @@ pub fn parse_type_helper(token: Token, ctx: &Context<'_, AllObject>, ir_ctx: &mu
             name.clone(),
             Rc::new(RefCell::new(parse_type_helper(*def, ctx, ir_ctx)?)),
         )),
-        _ => parse_expr(token, ctx, ir_ctx).and_then(
-            |e| e.call().and_then(
-                |e| e.try_get_type().map(|t|
-                    Type::AnotherType(Spanned::new(t, span))
-                ).ok_or(Error::Span(span))
-            )),
+        _ => parse_expr(token, ctx, ir_ctx).and_then(|e| {
+            e.call().and_then(|e| {
+                e.try_get_type()
+                    .map(|t| Type::AnotherType(Spanned::new(t, span)))
+                    .ok_or(Error::Span(span))
+            })
+        }),
     }
 }
 

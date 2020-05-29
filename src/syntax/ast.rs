@@ -1,6 +1,6 @@
-use std::ops::Deref;
-use std::fmt::{Debug, Formatter};
 use crate::common::{Span, Spanned};
+use std::fmt::{Debug, Formatter};
+use std::ops::Deref;
 
 #[derive(PartialEq, Clone)]
 pub struct Token {
@@ -96,7 +96,7 @@ pub struct FunctionImpl(
 #[derive(Debug, PartialEq)]
 pub struct FunctionBody(pub Token);
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct EnumDecl {
     pub name: Spanned<String>,
     pub variants: Vec<Spanned<EnumVariant>>,
@@ -119,4 +119,3 @@ pub enum EnumVariantKind {
 pub struct Generic {
     pub name: Spanned<String>,
 }
-

@@ -1,12 +1,15 @@
-use crate::ir::objects::{AllObject, FunctionObject, FunctionInstanceObject, CurriedFunction, Callable, EnumInstance, monomorphization};
-use crate::common::{Context, Error, SpannedError, Spanned};
-use std::ops::Deref;
-use crate::ir::{Expr, IrContext};
-use std::rc::Rc;
-use std::cell::RefCell;
-use crate::ir::types::{Type, OneTypeKind};
-use std::collections::HashMap;
+use crate::common::{Context, Error, Spanned, SpannedError};
+use crate::ir::objects::{
+    monomorphization, AllObject, Callable, CurriedFunction, EnumInstance, EnumType,
+    EnumVariantInstance, FunctionInstanceObject, FunctionObject,
+};
 use crate::ir::types::base_types::Function;
+use crate::ir::types::{OneTypeKind, Type};
+use crate::ir::{Expr, IrContext};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::ops::Deref;
+use std::rc::Rc;
 
 pub fn type_check_objects<'a>(
     objects: &[AllObject],
@@ -30,7 +33,11 @@ pub fn type_check_objects<'a>(
         .collect()
 }
 
-pub fn type_check_function(function: &FunctionObject, top: &Context<'_, AllObject>, ir_ctx: &mut IrContext) -> Result<(), Error> {
+pub fn type_check_function(
+    function: &FunctionObject,
+    top: &Context<'_, AllObject>,
+    ir_ctx: &mut IrContext,
+) -> Result<(), Error> {
     let ctx = function.create_ctx(top);
     let body = function.body.as_ref();
     let return_type = function.get_return_type();
@@ -62,7 +69,11 @@ macro_rules! binary_op {
     }};
 }
 
-pub fn type_check_expr(expr: &Expr, ctx: &Context<'_, AllObject>, ir_ctx: &mut IrContext) -> Result<Rc<RefCell<Type>>, Error> {
+pub fn type_check_expr(
+    expr: &Expr,
+    ctx: &Context<'_, AllObject>,
+    ir_ctx: &mut IrContext,
+) -> Result<Rc<RefCell<Type>>, Error> {
     match expr {
         Expr::Int(i) => Ok(i.get_type()),
         Expr::Add(l, r) => binary_op!(l, r, ctx, ir_ctx, add),
@@ -87,23 +98,33 @@ pub fn type_check_expr(expr: &Expr, ctx: &Context<'_, AllObject>, ir_ctx: &mut I
     }
 }
 
-fn type_check_object(obj: &Spanned<AllObject>, ctx: &Context<'_, AllObject>, ir_ctx: &mut IrContext) -> Result<Rc<RefCell<Type>>, Error> {
+fn type_check_object(
+    obj: &Spanned<AllObject>,
+    ctx: &Context<'_, AllObject>,
+    ir_ctx: &mut IrContext,
+) -> Result<Rc<RefCell<Type>>, Error> {
     match &obj.val {
         AllObject::EnumVariantInstance(v) => v.type_check_self(ctx, ir_ctx),
-        AllObject::CurriedFunction(f) => {
-            monomorphize_function(f, ctx, ir_ctx)
-                .map(|o| {
-                    *f.instance.borrow_mut() = Some(o.clone());
-                    o.ftype.clone()
-                })
-        }
-        o => Ok(o.get_type())
+        AllObject::CurriedFunction(f) => monomorphize_function(f, ctx, ir_ctx).map(|o| {
+            *f.instance.borrow_mut() = Some(o.clone());
+            o.ftype.clone()
+        }),
+        o => Ok(o.get_type()),
     }
 }
 
-fn monomorphize_function(function: &Rc<CurriedFunction>, ctx: &Context<'_, AllObject>, ir_ctx: &mut IrContext) -> Result<Rc<FunctionInstanceObject>, Error> {
+fn monomorphize_function(
+    function: &Rc<CurriedFunction>,
+    ctx: &Context<'_, AllObject>,
+    ir_ctx: &mut IrContext,
+) -> Result<Rc<FunctionInstanceObject>, Error> {
     let mut generics = HashMap::<String, Rc<RefCell<Type>>>::new();
-    generics.extend(helper(&function.orig.ftype(), &function.scope, ctx, ir_ctx)?);
+    generics.extend(helper(
+        &function.orig.ftype(),
+        &function.scope,
+        ctx,
+        ir_ctx,
+    )?);
     let inst = FunctionInstanceObject {
         orig: function.orig.clone(),
         ftype: monomorphize_type(&function.ftype, &generics, ctx, ir_ctx)?,
@@ -111,39 +132,46 @@ fn monomorphize_function(function: &Rc<CurriedFunction>, ctx: &Context<'_, AllOb
     Ok(ir_ctx.create_specialized_function(inst))
 }
 
-fn helper(ty: &Rc<RefCell<Type>>, exprs: &[Expr], ctx: &Context<'_, AllObject>, ir_ctx: &mut IrContext) -> Result<Vec<(String, Rc<RefCell<Type>>)>, Error> {
+fn helper(
+    ty: &Rc<RefCell<Type>>,
+    exprs: &[Expr],
+    ctx: &Context<'_, AllObject>,
+    ir_ctx: &mut IrContext,
+) -> Result<Vec<(String, Rc<RefCell<Type>>)>, Error> {
     match (ty.borrow().deref(), exprs) {
         (Type::Function(f), [x, xs @ ..]) => {
             let mut generics = match f.kind.get_value.borrow().deref() {
                 Type::Generic(g) => vec![(g.clone().inner(), type_check_expr(x, ctx, ir_ctx)?)],
                 Type::AnotherType(t) => match t.borrow().deref() {
                     Type::Generic(g) => vec![(g.clone().inner(), type_check_expr(x, ctx, ir_ctx)?)],
-                    _ => vec![]
-                }
+                    _ => vec![],
+                },
                 _ => vec![],
             };
-            helper(&f.kind.return_value, xs, ctx, ir_ctx)
-                .map(|mut res| {
-                    res.append(&mut generics);
-                    res
-                })
+            helper(&f.kind.return_value, xs, ctx, ir_ctx).map(|mut res| {
+                res.append(&mut generics);
+                res
+            })
         }
-        (Type::Generic(g), [x]) => Ok(vec![
-            (g.clone().inner(), type_check_expr(x, ctx, ir_ctx)?)
-        ]),
+        (Type::Generic(g), [x]) => Ok(vec![(g.clone().inner(), type_check_expr(x, ctx, ir_ctx)?)]),
         (t, [x]) => match x.try_get_type().unwrap().borrow().is_part_of(t) {
             true => Ok(vec![]),
-            false => Err(Error::Span(x.span()))
-        }
+            false => Err(Error::Span(x.span())),
+        },
         (t, []) => Ok(vec![]),
         res => {
             //dbg!(res);
             unreachable!()
-        },
+        }
     }
 }
 
-fn monomorphize_type(ty: &Rc<RefCell<Type>>, generics: &HashMap<String, Rc<RefCell<Type>>>, ctx: &Context<'_, AllObject>, ir_ctx: &mut IrContext) -> Result<Rc<RefCell<Type>>, Error> {
+fn monomorphize_type(
+    ty: &Rc<RefCell<Type>>,
+    generics: &HashMap<String, Rc<RefCell<Type>>>,
+    ctx: &Context<'_, AllObject>,
+    ir_ctx: &mut IrContext,
+) -> Result<Rc<RefCell<Type>>, Error> {
     match ty.borrow().deref() {
         Type::Generic(g) => match generics.get(g.as_str()) {
             Some(t) => Ok(t.clone()),
@@ -154,10 +182,13 @@ fn monomorphize_type(ty: &Rc<RefCell<Type>>, generics: &HashMap<String, Rc<RefCe
             let return_value = monomorphize_type(&f.kind.get_value, generics, ctx, ir_ctx)?;
             Ok(Rc::new(RefCell::new(Type::Function(OneTypeKind {
                 name: f.name.clone(),
-                kind: Spanned::new(Function {
-                    get_value,
-                    return_value,
-                }, f.kind.span),
+                kind: Spanned::new(
+                    Function {
+                        get_value,
+                        return_value,
+                    },
+                    f.kind.span,
+                ),
             }))))
         }
         Type::EnumInstance(e) => {
@@ -173,12 +204,8 @@ fn monomorphize_type(ty: &Rc<RefCell<Type>>, generics: &HashMap<String, Rc<RefCe
                 }
             }
         }
-        Type::AnotherType(t) => {
-            monomorphize_type(&t.val, generics, ctx, ir_ctx)
-        }
-        Type::ParenthesisType(t) => {
-            monomorphize_type(&t, generics, ctx, ir_ctx)
-        }
-        _ => Ok(ty.clone())
+        Type::AnotherType(t) => monomorphize_type(&t.val, generics, ctx, ir_ctx),
+        Type::ParenthesisType(t) => monomorphize_type(&t, generics, ctx, ir_ctx),
+        _ => Ok(ty.clone()),
     }
 }

@@ -1,10 +1,10 @@
-use crate::common::{Spanned, VecType, AddSpan};
-use std::rc::Rc;
-use std::cell::RefCell;
+use crate::common::{AddSpan, Spanned, VecType};
 use crate::ir::types::{Type, TypeKind, TypeOperable};
 use itertools::Itertools;
-use std::fmt::{Display, Formatter};
+use std::cell::RefCell;
 use std::cmp::{max, min};
+use std::fmt::{Display, Formatter};
+use std::rc::Rc;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Int {
@@ -624,7 +624,6 @@ impl Slice {
         }
     }
 }
-
 
 impl VecType<Int> {
     pub fn try_convert_to_value(self, value: i128) -> Result<Self, String> {

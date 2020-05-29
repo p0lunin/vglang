@@ -1,4 +1,4 @@
-use crate::ir::types::{TypeOperable, OneTypeKind, Type};
+use crate::ir::types::{OneTypeKind, Type, TypeOperable};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Unknown;

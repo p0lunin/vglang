@@ -1,18 +1,19 @@
+use crate::common::{Error, Span, Spanned};
+use crate::ir::objects::{EnumInstance, EnumType, EnumVariant, EnumVariantInstance};
+use crate::ir::types::base_types::{Function, Int, TypeType, Unknown};
 use crate::ir::types::{OneTypeKind, TypeKind, TypeOperable};
-use crate::ir::types::base_types::{Int, Function, TypeType, Unknown};
-use std::rc::Rc;
-use crate::ir::objects::{EnumType, EnumInstance, EnumVariant, EnumVariantInstance};
-use std::cell::{RefCell, Ref};
-use crate::common::{Spanned, Span, Error};
-use std::ops::Deref;
-use std::fmt::{Display, Formatter};
+use std::cell::{Ref, RefCell};
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
+use std::mem;
+use std::ops::Deref;
+use std::rc::Rc;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Type {
     Function(OneTypeKind<Function>),
     Int(TypeKind<Int>),
-    Enum(Rc<EnumType>),
+    Enum(Rc<RefCell<EnumType>>),
     EnumInstance(Rc<EnumInstance>),
     EnumVariant(Rc<EnumVariant>),
     EnumVariantInstance(Rc<EnumVariantInstance>),
@@ -41,10 +42,11 @@ impl Type {
             (l, Type::AnotherType(r)) => l.is_part_of(r.borrow().deref()),
             (Type::ParenthesisType(l), r) => l.borrow().is_part_of(r),
             (l, Type::ParenthesisType(r)) => l.is_part_of(r.borrow().deref()),
-            (Type::Named(_, l), Type::Named(_, r)) => l == r,
+            (Type::Named(_, l), Type::Named(_, r)) => l.borrow().is_part_of(r.borrow().deref()),
             (Type::Named(_, l), r) => l.borrow().is_part_of(r),
             (l, Type::Named(_, r)) => l.is_part_of(r.borrow().deref()),
             (Type::EnumVariant(v), Type::EnumVariant(e)) => Rc::ptr_eq(v, e),
+            (Type::EnumVariantInstance(v), Type::Enum(e)) => e.borrow().has_variant(v),
             (Type::EnumVariantInstance(v), Type::EnumInstance(e)) => e.has_variant(v),
             (Type::EnumVariantInstance(v), Type::EnumVariant(e)) => Rc::ptr_eq(v.origin(), e),
             (Type::EnumVariantInstance(v), Type::EnumVariantInstance(e)) => {
@@ -52,7 +54,6 @@ impl Type {
             }
             (Type::EnumInstance(e), Type::EnumInstance(v)) => e.is_part_of(v),
             (Type::Generic(l), Type::Generic(r)) => l.as_str() == r.as_str(),
-            (_, Type::Generic(_)) => true,
             _ => false,
         }
     }
@@ -96,19 +97,23 @@ impl Type {
         }
     }
 
-    pub fn monomorhize(this: &Rc<RefCell<Type>>, generics: &HashMap<String, Rc<RefCell<Type>>>) -> Rc<RefCell<Type>> {
+    pub fn monomorhize(
+        this: &Rc<RefCell<Type>>,
+        generics: &HashMap<String, Rc<RefCell<Type>>>,
+    ) -> Rc<RefCell<Type>> {
         match this.borrow().deref() {
-            Type::Function(f) => {
-                Rc::new(RefCell::new(Type::Function(OneTypeKind {
-                    name: f.name.clone(),
-                    kind: Spanned::new(Function {
+            Type::Function(f) => Rc::new(RefCell::new(Type::Function(OneTypeKind {
+                name: f.name.clone(),
+                kind: Spanned::new(
+                    Function {
                         get_value: Type::monomorhize(&f.kind.get_value, generics),
                         return_value: Type::monomorhize(&f.kind.return_value, generics),
-                    }, f.kind.span),
-                })))
-            }
+                    },
+                    f.kind.span,
+                ),
+            }))),
             Type::Generic(g) => generics.get(g.as_str()).unwrap().clone(),
-            _ => this.clone()
+            _ => this.clone(),
         }
     }
 
@@ -150,7 +155,7 @@ macro_rules! apply_op {
             Type::Enum(e) => Err(format!(
                 "Cannot {} enum type {} to {}",
                 stringify!($op),
-                e,
+                e.borrow(),
                 $value
             )),
             Type::EnumVariant(e) => Err(format!(
@@ -193,7 +198,7 @@ impl Display for Type {
             Type::Named(name, def) => {
                 f.write_str(&format!("{{{}: {}}}", name, def.borrow().deref()))
             }
-            Type::Enum(e) => Display::fmt(e, f),
+            Type::Enum(e) => Display::fmt(e.borrow().deref(), f),
             Type::EnumVariant(e) => Display::fmt(e, f),
             Type::EnumVariantInstance(e) => Display::fmt(e, f),
             Type::Generic(g) => Display::fmt(g, f),
@@ -212,7 +217,7 @@ impl Type {
             Type::AnotherType(t) => t.borrow().span(),
             Type::ParenthesisType(t) => t.borrow().span(),
             Type::Named(name, def) => name.span.extend(&def.borrow().span()),
-            Type::Enum(e) => e.span(),
+            Type::Enum(e) => e.borrow().span(),
             Type::EnumVariant(e) => e.span(),
             Type::EnumVariantInstance(e) => e.span(),
             Type::Generic(g) => g.span,
@@ -308,7 +313,7 @@ impl Type {
                 inner.remove_name();
                 inner.neg()
             }
-            Type::Enum(e) => Err(format!("Cannot neg enum type {}", e)),
+            Type::Enum(e) => Err(format!("Cannot neg enum type {}", e.borrow())),
             Type::EnumVariant(e) => Err(format!("Cannot neg enum variant type {}", e)),
             Type::EnumVariantInstance(e) => {
                 Err(format!("Cannot neg enum variant instance type {}", e))
@@ -379,7 +384,6 @@ impl Type {
     }
 }
 
-
 impl Type {
     pub fn implication(self, other: Self) -> Self {
         let span = self.span().extend(&other.span());
@@ -425,11 +429,11 @@ impl Type {
                 unsafe { std::mem::transmute(borrowed.name()) }
             }
             Type::Named(t, _) => t.as_str(),
-            Type::Enum(e) => e.name(),
+            Type::Enum(e) => unsafe { mem::transmute(e.borrow().name()) },
             Type::EnumVariant(e) => e.name(),
             Type::EnumVariantInstance(e) => e.name(),
             Type::Generic(g) => &g,
-            Type::EnumInstance(e) => e.name()
+            Type::EnumInstance(e) => e.name(),
         }
     }
 }

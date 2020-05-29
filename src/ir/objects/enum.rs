@@ -1,34 +1,55 @@
+use crate::common::{Context, Error, Span, Spanned};
+use crate::ir::expr::Expr;
+use crate::ir::objects::{AllObject, TypeObject};
+use crate::ir::type_check::type_check_expr;
+use crate::ir::types::base_types::Function;
+use crate::ir::types::{parse_type_helper, OneTypeKind, Type};
+use crate::ir::IrContext;
+use crate::syntax::ast;
+use crate::syntax::ast::{EnumDecl, EnumVariantKind};
+use itertools::Itertools;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::mem;
 use std::ops::Deref;
 use std::rc::Rc;
-use crate::syntax::ast::{EnumDecl, EnumVariantKind};
-use crate::syntax::ast;
-use crate::ir::objects::{AllObject, TypeObject};
-use crate::common::{Span, Error, Context, Spanned};
-use crate::ir::expr::Expr;
-use crate::ir::types::{Type, parse_type_helper, OneTypeKind};
-use crate::ir::type_check::type_check_expr;
-use crate::ir::types::base_types::Function;
-use crate::ir::IrContext;
-use itertools::Itertools;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Generic {
     name: Spanned<String>,
 }
 
-#[derive(Debug, PartialEq)]
 pub struct EnumType {
     pub(crate) decl: EnumDecl,
     variants: Vec<Rc<EnumVariant>>,
     generics: Vec<Spanned<Generic>>,
 }
 
+impl Debug for EnumType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        f.debug_struct("EnumType")
+            .field("generics", &self.generics)
+            .field(
+                "variants",
+                &self.variants.iter().map(|v| &v.orig).collect::<Vec<_>>(),
+            )
+            .finish()
+    }
+}
+
+impl PartialEq for EnumType {
+    fn eq(&self, other: &Self) -> bool {
+        self.decl == other.decl && self.generics == other.generics
+    }
+}
+
 impl EnumType {
-    pub fn from_ast(data: EnumDecl, ctx: &Context<'_, AllObject>, ir_ctx: &mut IrContext) -> Result<Self, Error> {
+    pub fn from_ast(
+        data: EnumDecl,
+        ctx: &Context<'_, AllObject>,
+        ir_ctx: &mut IrContext,
+    ) -> Result<Rc<RefCell<Self>>, Error> {
         let generics = data
             .generics
             .iter()
@@ -41,6 +62,12 @@ impl EnumType {
                 )
             })
             .collect::<Vec<_>>();
+        let enum_def = Rc::new(RefCell::new(EnumType {
+            decl: data.clone(),
+            variants: vec![],
+            generics: generics.clone(),
+        }));
+        let enum_obj = AllObject::Enum(enum_def.clone());
         let ctx = Context {
             objects: generics
                 .iter()
@@ -50,6 +77,7 @@ impl EnumType {
                         ttype: Rc::new(RefCell::new(Type::Generic(g.name.clone()))),
                     }))
                 })
+                .chain(vec![enum_obj])
                 .collect(),
             parent: Some(ctx),
         };
@@ -75,11 +103,8 @@ impl EnumType {
                 }))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(Self {
-            decl: data,
-            variants,
-            generics,
-        })
+        enum_def.borrow_mut().variants = variants;
+        Ok(enum_def)
     }
 
     pub fn span(&self) -> Span {
@@ -90,49 +115,73 @@ impl EnumType {
         &self.decl.name
     }
 
-    pub fn call(self: &Rc<Self>) -> Result<AllObject, Error> {
-        match self.generics.is_empty() {
-            true => Ok(AllObject::EnumInstance(Rc::new(EnumInstance {
-                orig: self.clone(),
-                generics: vec![],
-                variants: vec![],
-            }))),
+    pub fn has_variant(&self, variant: &EnumVariantInstance) -> bool {
+        self.variants
+            .iter()
+            .any(|v| Rc::ptr_eq(v, &variant.variant))
+    }
+
+    pub fn call(th: &Rc<RefCell<Self>>) -> Result<AllObject, Error> {
+        let this = th.borrow();
+        match this.generics.is_empty() {
+            true => {
+                mem::drop(this);
+                Ok(AllObject::EnumInstance(Rc::new(EnumInstance {
+                    orig: th.clone(),
+                    generics: vec![],
+                    variants: vec![],
+                })))
+            }
             false => {
-                let types = self.generics.iter().map(|g| {
-                    Rc::new(RefCell::new(Type::Generic(g.name.clone())))
-                })
+                let types = this
+                    .generics
+                    .iter()
+                    .map(|g| Rc::new(RefCell::new(Type::Generic(g.name.clone()))))
                     .collect::<Vec<_>>();
+                mem::drop(this);
                 Ok(AllObject::CreateEnumInstanceFunc(CreateEnumInstanceFunc {
-                    ftype: create_func_from_types(&types, Rc::new(RefCell::new(Type::Enum(self.clone())))),
-                    orig: self.clone(),
+                    ftype: create_func_from_types(
+                        &types,
+                        Rc::new(RefCell::new(Type::Enum(th.clone()))),
+                    ),
+                    orig: th.clone(),
                     generics: HashMap::new(),
                 }))
             }
         }
     }
 
-    pub fn call_with_arg_expr(self: &Rc<Self>, expr: Expr, span: Span) -> Result<AllObject, Error> {
-        match self.generics.is_empty() {
+    pub fn call_with_arg_expr(
+        th: &Rc<RefCell<Self>>,
+        expr: Expr,
+        span: Span,
+    ) -> Result<AllObject, Error> {
+        let this = th.borrow();
+        match this.generics.is_empty() {
             true => Err(Error::Span(span)),
             false => {
-                let mut types = self.generics.iter().map(|g| {
-                    Rc::new(RefCell::new(Type::Generic(g.name.clone())))
-                })
+                let mut types = this
+                    .generics
+                    .iter()
+                    .map(|g| Rc::new(RefCell::new(Type::Generic(g.name.clone()))))
                     .collect::<Vec<_>>();
                 let mut map = HashMap::new();
-                map.insert(self.generics.first().unwrap().name.clone().inner(), expr);
+                map.insert(this.generics.first().unwrap().name.clone().inner(), expr);
                 types.remove(0);
                 Ok(AllObject::CreateEnumInstanceFunc(CreateEnumInstanceFunc {
-                    ftype: create_func_from_types(&types, Rc::new(RefCell::new(Type::Enum(self.clone())))),
-                    orig: self.clone(),
+                    ftype: create_func_from_types(
+                        &types,
+                        Rc::new(RefCell::new(Type::Enum(th.clone()))),
+                    ),
+                    orig: th.clone(),
                     generics: map,
                 }))
             }
         }
     }
 
-    pub fn try_get_member(self: &Rc<Self>, name: &str) -> Option<AllObject> {
-        self
+    pub fn try_get_member(this: &Rc<RefCell<Self>>, name: &str) -> Option<AllObject> {
+        this.borrow()
             .variants
             .iter()
             .find(|v| v.name() == name)
@@ -150,20 +199,21 @@ impl EnumType {
 
 impl Display for EnumType {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        f.write_str(&self.decl.name)
+        f.write_str(&self.decl.name)?;
+        Ok(())
     }
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct CreateEnumInstanceFunc {
     ftype: Rc<RefCell<Type>>,
-    orig: Rc<EnumType>,
+    orig: Rc<RefCell<EnumType>>,
     generics: HashMap<String, Expr>,
 }
 
 impl CreateEnumInstanceFunc {
     pub fn name(&self) -> &str {
-        &self.orig.name()
+        unsafe { mem::transmute(self.orig.borrow().name()) }
     }
 
     pub fn call(&self) -> Rc<RefCell<Type>> {
@@ -200,12 +250,18 @@ impl CreateEnumInstanceFunc {
                     generics.insert(name, ty.clone());
                     generics_types.push(ty);
                 });
-                let variants = self.orig.variants.iter().map(|v| {
-                    Rc::new(EnumInstanceVariantInstance {
-                        variant: v.clone(),
-                        data: monomorphization(v.data.get_data(), &generics),
+                let variants = self
+                    .orig
+                    .borrow()
+                    .variants
+                    .iter()
+                    .map(|v| {
+                        Rc::new(EnumInstanceVariantInstance {
+                            variant: v.clone(),
+                            data: monomorphization(v.data.get_data(), &generics),
+                        })
                     })
-                }).collect();
+                    .collect();
                 Ok(AllObject::EnumInstance(ctx.create_specialized_enum(
                     EnumInstance {
                         orig: self.orig.clone(),
@@ -213,18 +269,20 @@ impl CreateEnumInstanceFunc {
                         variants,
                     },
                 )))
-            },
+            }
         }
     }
 }
 
-pub fn monomorphization<'a>(data: impl Iterator<Item=&'a Rc<RefCell<Type>>>, generics: &HashMap<String, Rc<RefCell<Type>>>) -> Vec<Rc<RefCell<Type>>> {
-    data.map(|t| {
-        match Type::get_inner_cell(t).borrow().deref() {
-            Type::Generic(n) => generics.get(n.as_str()).unwrap().clone(),
-            _ => t.clone()
-        }
-    }).collect()
+pub fn monomorphization<'a>(
+    data: impl Iterator<Item=&'a Rc<RefCell<Type>>>,
+    generics: &HashMap<String, Rc<RefCell<Type>>>,
+) -> Vec<Rc<RefCell<Type>>> {
+    data.map(|t| match Type::get_inner_cell(t).borrow().deref() {
+        Type::Generic(n) => generics.get(n.as_str()).unwrap().clone(),
+        _ => t.clone(),
+    })
+        .collect()
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -235,18 +293,18 @@ pub struct EnumInstanceVariantInstance {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct EnumInstance {
-    pub orig: Rc<EnumType>,
+    pub orig: Rc<RefCell<EnumType>>,
     pub generics: Vec<Rc<RefCell<Type>>>,
     pub variants: Vec<Rc<EnumInstanceVariantInstance>>,
 }
 
 impl EnumInstance {
     pub fn name(&self) -> &str {
-        self.orig.name()
+        unsafe { mem::transmute(self.orig.borrow().name()) }
     }
 
     pub fn span(&self) -> Span {
-        self.orig.span()
+        self.orig.borrow().span()
     }
 
     pub fn call(self: &Rc<EnumInstance>) -> Rc<RefCell<Type>> {
@@ -255,6 +313,7 @@ impl EnumInstance {
 
     pub fn try_get_member(self: &Rc<Self>, name: &str) -> Option<AllObject> {
         self.orig
+            .borrow()
             .variants
             .iter()
             .find(|v| v.name() == name)
@@ -270,27 +329,33 @@ impl EnumInstance {
     }
 
     pub fn has_variant(&self, variant: &Rc<EnumVariantInstance>) -> bool {
-        self.variants.iter().any(|v| {
-            variant.is_part_of(v)
-        })
+        self.variants.iter().any(|v| variant.is_part_of(v))
     }
 
     pub fn is_part_of(&self, other: &EnumInstance) -> bool {
-        Rc::ptr_eq(&self.orig, &other.orig) &&
-            self.generics.iter().zip(other.generics.iter()).all(|(l, r)| {
-                l.borrow().is_part_of(r.borrow().deref())
-            })
+        Rc::ptr_eq(&self.orig, &other.orig)
+            && self
+            .generics
+            .iter()
+            .zip(other.generics.iter())
+            .all(|(l, r)| l.borrow().is_part_of(r.borrow().deref()))
     }
 }
 
 impl Display for EnumInstance {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        Display::fmt(&self.orig, f)?;
+        Display::fmt(&self.orig.borrow(), f)?;
         match self.generics.is_empty() {
             true => {}
             false => {
                 f.write_str("<")?;
-                f.write_str(&self.generics.iter().map(|t| t.borrow().to_string()).join(", "));
+                f.write_str(
+                    &self
+                        .generics
+                        .iter()
+                        .map(|t| t.borrow().to_string())
+                        .join(", "),
+                );
                 f.write_str(">")?
             }
         }
@@ -378,10 +443,13 @@ impl EnumVariantInstance {
             .map(|_| Rc::new(RefCell::new(Type::EnumVariantInstance(self.clone()))))
     }
     pub fn is_part_of(&self, var: &Rc<EnumInstanceVariantInstance>) -> bool {
-        self.variant == var.variant &&
-            self.data.iter().zip(var.data.iter()).all(|(e, ty)| {
-                e.try_get_type().unwrap().borrow().is_part_of(ty.borrow().deref())
-            })
+        self.variant == var.variant
+            && self.data.iter().zip(var.data.iter()).all(|(e, ty)| {
+            e.try_get_type()
+                .unwrap()
+                .borrow()
+                .is_part_of(ty.borrow().deref())
+        })
     }
 }
 

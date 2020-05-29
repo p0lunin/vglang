@@ -1,4 +1,4 @@
-use crate::common::{Spanned, VecType, Span, AddSpan};
+use crate::common::{AddSpan, Span, Spanned, VecType};
 use std::fmt::{Debug, Display, Formatter};
 
 #[derive(Debug, PartialEq, Clone)]
