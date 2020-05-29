@@ -13,6 +13,7 @@ use crate::ir::types::{Type, parse_type_helper, OneTypeKind};
 use crate::ir::type_check::type_check_expr;
 use crate::ir::types::base_types::Function;
 use crate::ir::IrContext;
+use itertools::Itertools;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Generic {
@@ -289,10 +290,7 @@ impl Display for EnumInstance {
             true => {}
             false => {
                 f.write_str("<")?;
-                self.generics.iter().for_each(|t| {
-                    t.borrow().fmt(f).unwrap();
-                    f.write_str(", ");
-                });
+                f.write_str(&self.generics.iter().map(|t| t.borrow().to_string()).join(", "));
                 f.write_str(">")?
             }
         }

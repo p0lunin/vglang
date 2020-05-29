@@ -13,6 +13,7 @@ pub struct CurriedFunction {
     pub ftype: Rc<RefCell<Type>>,
     pub scope: Vec<Expr>,
     pub orig: Callable,
+    pub instance: RefCell<Option<Rc<FunctionInstanceObject>>>
 }
 
 #[derive(Debug, PartialEq, Clone)]

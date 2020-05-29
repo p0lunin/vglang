@@ -97,6 +97,7 @@ impl AllObject {
                     .clone(),
                 scope: vec![arg],
                 orig: Callable::Func(f.clone()),
+                instance: RefCell::new(None)
             }))),
             AllObject::Type(_) => Err(Error::Span(span)),
             AllObject::FunctionDefinition(def) => {
@@ -109,6 +110,7 @@ impl AllObject {
                         .clone(),
                     scope: vec![arg],
                     orig: Callable::FuncDef(def.clone()),
+                    instance: RefCell::new(None)
                 })))
             }
             AllObject::CurriedFunction(f) => {
@@ -119,6 +121,7 @@ impl AllObject {
                     ftype: new_type,
                     scope,
                     orig: f.orig.clone(),
+                    instance: RefCell::new(None)
                 })))
             }
             AllObject::Var(v) => v.data.call_with_arg_expr(arg, ctx, span),
@@ -130,6 +133,7 @@ impl AllObject {
                     .ok_or(Error::Span(span))?,
                 scope: vec![arg],
                 orig: Callable::Arg(a.clone()),
+                instance: RefCell::new(None)
             }))),
             AllObject::Enum(e) => e.call_with_arg_expr(arg, span),
             AllObject::EnumVariant(e) => Ok(e.call_with_arg_expr(arg)),

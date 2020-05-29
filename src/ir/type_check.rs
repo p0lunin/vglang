@@ -93,6 +93,7 @@ fn type_check_object(obj: &Spanned<AllObject>, ctx: &Context<'_, AllObject>, ir_
         AllObject::CurriedFunction(f) => {
             monomorphize_function(f, ctx, ir_ctx)
                 .map(|o| {
+                    *f.instance.borrow_mut() = Some(o.clone());
                     o.ftype.clone()
                 })
         }
