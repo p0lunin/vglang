@@ -1,7 +1,9 @@
 use clap::{App, Arg};
+use fsmcreator::interpreter::Interpreter;
 use fsmcreator::{parse_text, parse_tokens, peg_error_to_showed, type_check_objects};
 use std::fs::File;
-use std::io::Read;
+use std::io;
+use std::io::{stdin, Read, Write};
 
 fn main() {
     let app = App::new("Tekstkvest")
@@ -55,7 +57,28 @@ fn main() {
         Ok(()) => {}
     }
     println!("Types: ");
-    ctx.objects.into_iter().for_each(|o| {
+    ctx.objects.iter().for_each(|o| {
         println!("{}\n", o);
+    });
+
+    let mut interpreter = Interpreter::from_ir_context(ctx, ir_ctx);
+
+    repl(">>", |d| match interpreter.execute_code(&d) {
+        Ok(b) => b.to_string(),
+        Err(e) => e,
     })
+}
+
+fn repl(s: &str, mut f: impl FnMut(String) -> String) {
+    loop {
+        print!("{}", s);
+        io::stdout().flush();
+        let mut data = String::new();
+        stdin().read_line(&mut data).expect("Error when read line");
+        data.pop();
+        match data.as_str() {
+            "exit" => return,
+            _ => println!("{}", f(data)),
+        }
+    }
 }

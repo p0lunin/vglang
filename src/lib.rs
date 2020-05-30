@@ -1,4 +1,5 @@
 mod common;
+pub mod interpreter;
 mod ir;
 mod syntax;
 

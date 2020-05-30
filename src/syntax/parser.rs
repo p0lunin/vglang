@@ -222,3 +222,7 @@ pub fn parse_text(
 ) -> Result<Vec<Spanned<TopLevelToken>>, peg::error::ParseError<peg::str::LineCol>> {
     lang::parse_lang(data)
 }
+
+pub fn parse_token(data: &str) -> Result<Token, peg::error::ParseError<peg::str::LineCol>> {
+    lang::type_definition(data, 1)
+}

@@ -5,7 +5,7 @@ mod type_check;
 pub mod types;
 
 pub use self::{
-    expr::Expr,
+    expr::{parse_expr, Expr},
     transform::{parse_function, parse_tokens},
     type_check::*,
 };
@@ -15,11 +15,17 @@ use std::rc::Rc;
 
 #[derive(Debug)]
 pub struct IrContext {
-    specialized_enums: Vec<Rc<EnumInstance>>,
-    specialized_functions: Vec<Rc<FunctionInstanceObject>>,
+    pub specialized_enums: Vec<Rc<EnumInstance>>,
+    pub specialized_functions: Vec<Rc<FunctionInstanceObject>>,
 }
 
 impl IrContext {
+    pub fn new() -> Self {
+        Self {
+            specialized_enums: vec![],
+            specialized_functions: vec![],
+        }
+    }
     pub fn create_specialized_enum(&mut self, inst: EnumInstance) -> Rc<EnumInstance> {
         self.specialized_enums
             .iter()
