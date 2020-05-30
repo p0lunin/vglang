@@ -46,6 +46,7 @@ impl Type {
             (Type::Named(_, l), r) => l.borrow().is_part_of(r),
             (l, Type::Named(_, r)) => l.is_part_of(r.borrow().deref()),
             (Type::EnumVariant(v), Type::EnumVariant(e)) => Rc::ptr_eq(v, e),
+            (Type::Enum(e1), Type::Enum(e2)) => e1 == e2,
             (Type::EnumVariantInstance(v), Type::Enum(e)) => e.borrow().has_variant(v),
             (Type::EnumVariantInstance(v), Type::EnumInstance(e)) => e.has_variant(v),
             (Type::EnumVariantInstance(v), Type::EnumVariant(e)) => Rc::ptr_eq(v.origin(), e),

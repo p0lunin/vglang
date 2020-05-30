@@ -138,7 +138,7 @@ fn helper(
     ctx: &Context<'_, AllObject>,
     ir_ctx: &mut IrContext,
 ) -> Result<Vec<(String, Rc<RefCell<Type>>)>, Error> {
-    match (ty.borrow().deref(), exprs) {
+    match (Type::get_inner_cell(ty).borrow().deref(), exprs) {
         (Type::Function(f), [x, xs @ ..]) => {
             let mut generics = match f.kind.get_value.borrow().deref() {
                 Type::Generic(g) => vec![(g.clone().inner(), type_check_expr(x, ctx, ir_ctx)?)],
@@ -154,7 +154,7 @@ fn helper(
             })
         }
         (Type::Generic(g), [x]) => Ok(vec![(g.clone().inner(), type_check_expr(x, ctx, ir_ctx)?)]),
-        (t, [x]) => match x.try_get_type().unwrap().borrow().is_part_of(t) {
+        (t, [x]) => match dbg!(x.try_get_type()).unwrap().borrow().is_part_of(dbg!(t)) {
             true => Ok(vec![]),
             false => Err(Error::Span(x.span())),
         },
