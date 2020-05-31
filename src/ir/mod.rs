@@ -10,11 +10,13 @@ pub use self::{
     type_check::*,
 };
 
-use crate::ir::objects::{EnumInstance, FunctionInstanceObject};
+use crate::common::Error;
+use crate::ir::objects::{EnumInstance, FunctionInstanceObject, FunctionObject};
 use std::rc::Rc;
 
 #[derive(Debug)]
 pub struct IrContext {
+    pub functions: Vec<FunctionObject>,
     pub specialized_enums: Vec<Rc<EnumInstance>>,
     pub specialized_functions: Vec<Rc<FunctionInstanceObject>>,
 }
@@ -22,8 +24,26 @@ pub struct IrContext {
 impl IrContext {
     pub fn new() -> Self {
         Self {
+            functions: vec![],
             specialized_enums: vec![],
             specialized_functions: vec![],
+        }
+    }
+    pub fn add_function(&mut self, function: FunctionObject) -> Result<(), Error> {
+        match self
+            .functions
+            .iter()
+            .find(|f| f.def.name.as_str() == function.def.name.as_str())
+        {
+            Some(f) => Err(Error::Custom(
+                f.def.name.span,
+                format!("Function with name {} already defined", f.def.name),
+                "here".to_owned(),
+            )),
+            _ => {
+                self.functions.push(function);
+                Ok(())
+            }
         }
     }
     pub fn create_specialized_enum(&mut self, inst: EnumInstance) -> Rc<EnumInstance> {

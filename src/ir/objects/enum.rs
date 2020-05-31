@@ -409,8 +409,8 @@ impl EnumVariant {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct EnumVariantInstance {
-    variant: Rc<EnumVariant>,
-    data: Vec<Expr>,
+    pub variant: Rc<EnumVariant>,
+    pub data: Vec<Expr>,
 }
 
 impl EnumVariantInstance {
@@ -434,6 +434,10 @@ impl EnumVariantInstance {
             .map(|(expr, ty)| {
                 let expr_ty = type_check_expr(expr, ctx, ir_ctx)?;
                 let borrowed = expr_ty.borrow();
+                match Type::get_inner_cell(ty).borrow().deref() {
+                    Type::Generic(_) => return Ok(()),
+                    _ => {}
+                }
                 match borrowed.is_part_of(ty.borrow().deref()) {
                     true => Ok(()),
                     false => Err(Error::Span(expr.span())),
@@ -455,10 +459,17 @@ impl EnumVariantInstance {
 
 impl Display for EnumVariantInstance {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(f, "instance of {}\n", self.variant)?;
-        self.data.iter().for_each(|o| {
-            write!(f, "   {}", o.try_get_type().unwrap().borrow()).unwrap();
-        });
+        write!(f, "{}", self.variant)?;
+        match self.data.is_empty() {
+            true => {},
+            false => {
+                f.write_str("<")?;
+                f.write_str(&self.data.iter().map(|o| {
+                    o.try_get_type().unwrap().borrow().to_string()
+                }).join(", "))?;
+                f.write_str(">")?;
+            }
+        }
         Ok(())
     }
 }

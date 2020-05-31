@@ -22,9 +22,17 @@ pub struct FunctionDefinition {
     pub ftype: Rc<RefCell<Type>>,
 }
 
+impl Display for FunctionDefinition {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "Function:\n")?;
+        write!(f, "Name: {}\n", self.name)?;
+        write!(f, "Type: {}\n", self.ftype.borrow())?;
+        Ok(())
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum Callable {
-    Func(Rc<FunctionObject>),
     FuncDef(Rc<FunctionDefinition>),
     Arg(Rc<Arg>),
 }
@@ -32,14 +40,12 @@ pub enum Callable {
 impl Callable {
     pub fn name(&self) -> &Spanned<String> {
         match self {
-            Callable::Func(f) => &f.name,
             Callable::FuncDef(def) => &def.name,
             Callable::Arg(a) => &a.name,
         }
     }
     pub fn ftype(&self) -> Rc<RefCell<Type>> {
         match self {
-            Callable::Func(f) => f.ftype.clone(),
             Callable::FuncDef(def) => def.ftype.clone(),
             Callable::Arg(a) => a.atype.clone(),
         }
@@ -48,16 +54,15 @@ impl Callable {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct FunctionObject {
-    pub name: Spanned<String>,
+    pub def: Rc<FunctionDefinition>,
     pub generics: Vec<Spanned<String>>,
     pub args: Vec<Rc<Arg>>,
-    pub ftype: Rc<RefCell<Type>>,
     pub body: Rc<Expr>,
 }
 
 impl FunctionObject {
     pub fn get_return_type(&self) -> Ref<Type> {
-        let borrowed = self.ftype.borrow();
+        let borrowed = self.def.ftype.borrow();
         Type::get_return_value(borrowed)
     }
 
@@ -81,8 +86,8 @@ impl FunctionObject {
         generics: &HashMap<String, Rc<RefCell<Type>>>,
     ) -> FunctionInstanceObject {
         FunctionInstanceObject {
-            orig: Callable::Func(self.clone()),
-            ftype: monomorphize_type(&self.ftype, generics),
+            orig: Callable::FuncDef(self.def.clone()),
+            ftype: monomorphize_type(&self.def.ftype, generics),
         }
     }
 }
@@ -99,10 +104,7 @@ fn monomorphize_type(
 
 impl Display for FunctionObject {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(f, "Function:\n")?;
-        write!(f, "Name: {}\n", self.name)?;
-        write!(f, "Type: {}\n", self.ftype.borrow())?;
-        Ok(())
+        self.def.fmt(f)
     }
 }
 

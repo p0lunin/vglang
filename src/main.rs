@@ -49,7 +49,7 @@ fn main() {
             return;
         }
     };
-    match type_check_objects(&ctx.objects, Some(&ctx), &mut ir_ctx) {
+    match type_check_objects(Some(&ctx), &mut ir_ctx) {
         Err(e) => {
             println!("{}", e.display(&data));
             return;

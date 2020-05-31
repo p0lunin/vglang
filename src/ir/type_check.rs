@@ -12,7 +12,6 @@ use std::ops::Deref;
 use std::rc::Rc;
 
 pub fn type_check_objects<'a>(
-    objects: &[AllObject],
     ctx: Option<&'a Context<'a, AllObject>>,
     ir_ctx: &mut IrContext,
 ) -> Result<(), Error> {
@@ -20,17 +19,21 @@ pub fn type_check_objects<'a>(
         objects: vec![],
         parent: ctx,
     };
-    objects
+    let mut functions = vec![];
+    std::mem::swap(&mut functions, &mut ir_ctx.functions);
+    functions
         .iter()
-        .map(|object| match object {
-            AllObject::Function(f) => {
-                ctx.objects.push(AllObject::Function(f.clone()));
-                type_check_function(&f, &ctx, ir_ctx)?;
-                Ok(())
-            }
-            _ => Ok(()),
+        .map(|f| {
+            ctx.objects
+                .push(AllObject::FunctionDefinition(f.def.clone()));
+            type_check_function(&f, &ctx, ir_ctx)?;
+            Ok(())
         })
-        .collect()
+        .collect::<Result<_, _>>()
+        .map(|()| {
+            std::mem::swap(&mut functions, &mut ir_ctx.functions);
+            ()
+        })
 }
 
 pub fn type_check_function(

@@ -36,6 +36,10 @@ pub fn parse_function(
         parent: Some(&ctx),
     };
     let func_type = Rc::new(RefCell::new(parse_type_helper(*type_def, &ctx, ir_ctx)?));
+    let func_def = Rc::new(FunctionDefinition {
+        name: name.clone(),
+        ftype: func_type.clone(),
+    });
     let count_args = func_type.borrow().count_args();
     let FunctionImpl(impl_name, args, body) = fimpl;
     let arg_types = Type::args_types(&func_type);
@@ -69,13 +73,14 @@ pub fn parse_function(
                 })));
             let expr = parse_expr(body.0, &ctx, ir_ctx)?;
 
-            Ok(AllObject::Function(Rc::new(FunctionObject {
-                name,
+            ir_ctx.add_function(FunctionObject {
+                def: func_def.clone(),
                 generics: vec![],
                 args,
-                ftype: func_type,
                 body: Rc::new(expr),
-            })))
+            })?;
+
+            Ok(AllObject::FunctionDefinition(func_def))
         }
     }
 }
@@ -113,10 +118,7 @@ fn get_bool_type() -> Rc<Spanned<Type>> {
 pub fn parse_tokens<'a>(
     tokens: Vec<Spanned<TopLevelToken>>,
 ) -> Result<(Context<'a, AllObject>, IrContext), Vec<Error>> {
-    let mut ir_ctx = IrContext {
-        specialized_enums: vec![],
-        specialized_functions: vec![],
-    };
+    let mut ir_ctx = IrContext::new();
     let mut errors = vec![];
     let mut ctx = Context {
         objects: vec![],

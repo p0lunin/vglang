@@ -22,7 +22,6 @@ pub enum AllObject {
     EnumVariantInstance(Rc<EnumVariantInstance>),
     CreateEnumVariantFunc(CreateEnumVariantFunc),
     CreateEnumInstanceFunc(CreateEnumInstanceFunc),
-    Function(Rc<FunctionObject>),
     CurriedFunction(Rc<CurriedFunction>),
     Arg(Rc<Arg>),
     Var(Rc<Var>),
@@ -32,16 +31,15 @@ impl Display for AllObject {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         match self {
             AllObject::Type(t) => f.write_str(&format!("{}", t)),
-            AllObject::Function(t) => f.write_str(&format!("{}", t)),
             AllObject::Var(_) => unimplemented!(),
-            AllObject::FunctionDefinition(_) => unimplemented!(),
+            AllObject::FunctionDefinition(o) => Display::fmt(&o, f),
             AllObject::CurriedFunction(_) => unimplemented!(),
             AllObject::Arg(_) => unimplemented!(),
             AllObject::Enum(e) => Display::fmt(&e.borrow(), f),
             AllObject::EnumVariant(e) => Display::fmt(e, f),
             AllObject::CreateEnumVariantFunc(_) => unimplemented!(),
-            AllObject::EnumVariantInstance(_) => unimplemented!(),
-            AllObject::EnumInstance(_) => unimplemented!(),
+            AllObject::EnumVariantInstance(e) => Display::fmt(e, f),
+            AllObject::EnumInstance(e) => Display::fmt(e, f),
             AllObject::CreateEnumInstanceFunc(_) => unimplemented!(),
         }
     }
@@ -51,7 +49,6 @@ impl HasName for AllObject {
     fn name(&self) -> &str {
         match self {
             AllObject::Type(t) => &t.name,
-            AllObject::Function(t) => &t.name,
             AllObject::Var(t) => &t.name,
             AllObject::FunctionDefinition(t) => &t.name,
             AllObject::CurriedFunction(f) => &f.orig.name(),
@@ -76,7 +73,6 @@ impl AllObject {
     pub fn get_type(&self) -> Rc<RefCell<Type>> {
         match self {
             AllObject::Type(t) => t.ttype.clone(),
-            AllObject::Function(t) => t.ftype.clone(),
             AllObject::Var(t) => t.get_type(),
             AllObject::FunctionDefinition(f) => f.ftype.clone(),
             AllObject::CurriedFunction(f) => f.ftype.clone(),
@@ -98,17 +94,6 @@ impl AllObject {
         span: Span,
     ) -> Result<AllObject, Error> {
         match self {
-            AllObject::Function(f) => Ok(AllObject::CurriedFunction(Rc::new(CurriedFunction {
-                ftype: f
-                    .ftype
-                    .borrow()
-                    .try_curry()
-                    .ok_or(Error::Span(span))?
-                    .clone(),
-                scope: vec![arg],
-                orig: Callable::Func(f.clone()),
-                instance: RefCell::new(None),
-            }))),
             AllObject::Type(_) => Err(Error::Span(span)),
             AllObject::FunctionDefinition(def) => {
                 Ok(AllObject::CurriedFunction(Rc::new(CurriedFunction {
