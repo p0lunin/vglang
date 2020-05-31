@@ -73,7 +73,7 @@ impl AllObject {
     pub fn get_type(&self) -> Rc<RefCell<Type>> {
         match self {
             AllObject::Type(t) => t.ttype.clone(),
-            AllObject::Var(t) => t.get_type(),
+            AllObject::Var(t) => t.ty.clone(),
             AllObject::FunctionDefinition(f) => f.ftype.clone(),
             AllObject::CurriedFunction(f) => f.ftype.clone(),
             AllObject::Arg(a) => a.atype.clone(),
@@ -119,7 +119,7 @@ impl AllObject {
                     instance: RefCell::new(None),
                 })))
             }
-            AllObject::Var(v) => v.data.call_with_arg_expr(arg, ctx, span),
+            AllObject::Var(v) => unimplemented!(),
             AllObject::Arg(a) => Ok(AllObject::CurriedFunction(Rc::new(CurriedFunction {
                 ftype: a.atype.borrow().try_curry().ok_or(Error::Span(span))?,
                 scope: vec![arg],
@@ -137,7 +137,7 @@ impl AllObject {
     pub fn try_get_member(&self, member: &str, span: Span) -> Result<AllObject, Error> {
         match self {
             AllObject::EnumInstance(e) => e.try_get_member(member).ok_or(Error::Span(span)),
-            AllObject::Var(v) => v.data.try_get_member(member, span),
+            AllObject::Var(v) => v.try_get_member(member).ok_or(Error::Span(span)),
             AllObject::Enum(e) => EnumType::try_get_member(e, member).ok_or(Error::Span(span)),
             _ => Err(Error::Span(span)),
         }

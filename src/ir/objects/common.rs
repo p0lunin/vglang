@@ -1,8 +1,9 @@
-use crate::common::Spanned;
-use crate::ir::objects::AllObject;
+use crate::common::{Error, Spanned};
+use crate::ir::objects::{AllObject, EnumInstance, EnumType};
 use crate::ir::types::Type;
 use std::cell::RefCell;
 use std::fmt::{Display, Formatter};
+use std::ops::Deref;
 use std::rc::Rc;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -26,14 +27,15 @@ impl Display for TypeObject {
 #[derive(Debug, PartialEq, Clone)]
 pub struct Var {
     pub name: Spanned<String>,
-    pub data: AllObject,
+    pub ty: Rc<RefCell<Type>>,
 }
 
 impl Var {
-    pub fn new(name: Spanned<String>, data: AllObject) -> Self {
-        Self { name, data }
-    }
-    pub fn get_type(&self) -> Rc<RefCell<Type>> {
-        self.data.get_type()
+    pub fn try_get_member(&self, name: &str) -> Option<AllObject> {
+        match Type::get_inner_cell(&self.ty).borrow().deref() {
+            Type::Enum(e) => EnumType::try_get_member(e, name),
+            Type::EnumInstance(e) => e.try_get_member(name),
+            _ => None,
+        }
     }
 }

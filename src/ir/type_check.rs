@@ -1,11 +1,11 @@
 use crate::common::{Context, Error, Spanned, SpannedError};
 use crate::ir::objects::{
     monomorphization, AllObject, Callable, CurriedFunction, EnumInstance, EnumType,
-    EnumVariantInstance, FunctionInstanceObject, FunctionObject,
+    EnumVariantInstance, FunctionInstanceObject, FunctionObject, Var,
 };
 use crate::ir::types::base_types::Function;
 use crate::ir::types::{OneTypeKind, Type};
-use crate::ir::{Expr, IrContext};
+use crate::ir::{parse_expr, Expr, IrContext};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ops::Deref;
@@ -98,6 +98,14 @@ pub fn type_check_expr(
                 ty.borrow().clone().neg().spanned_err(e.span())?,
             )))
         }),
+        Expr::Let { var, assign, expr } => {
+            let val = type_check_expr(assign.as_ref(), ctx, ir_ctx)?;
+            let ctx = Context {
+                objects: vec![AllObject::Var(var.clone())],
+                parent: Some(ctx),
+            };
+            type_check_expr(expr, &ctx, ir_ctx)
+        }
     }
 }
 

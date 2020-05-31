@@ -54,6 +54,11 @@ pub enum Ast {
     Named(Spanned<String>, Box<Token>),
     CallFunction(Box<Token>, Box<Token>),
     Dot(Box<Token>, Box<Token>),
+    Let {
+        var: Spanned<String>,
+        assign: Box<Token>,
+        expr: Box<Token>,
+    },
 }
 
 #[derive(Debug, PartialEq)]

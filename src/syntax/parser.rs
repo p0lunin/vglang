@@ -43,7 +43,7 @@ peg::parser! { grammar lang() for str {
         }
 
     rule function_impl(i: usize) -> Spanned<TopLevelToken>
-        = start:position!() name:ident() __ args:(ident_space())*  _ "=" _ body:type_definition(i) end:position!() {
+        = start:position!() name:ident() __ args:(ident_space())*  _ "=" _ body:statement(i) end:position!() {
             Spanned::new(TopLevelToken::FunctionImpl(FunctionImpl(name, args, FunctionBody(body))), Span::new(start, end))
         }
 
@@ -85,6 +85,18 @@ peg::parser! { grammar lang() for str {
                 0 => Spanned::new(EnumVariant { name: id, kind: EnumVariantKind::Unit }, Span::new(s, e)),
                 _ => Spanned::new(EnumVariant { name: id, kind: EnumVariantKind::WithData(types) }, Span::new(s, e))
             }
+        }
+
+    rule statement(i: usize) -> Token
+        = let_stat(i) / logic(i)
+
+    rule let_stat(i: usize) -> Token
+        = s:position!() "let" __ id:ident() _ "=" _ assign:statement(i) _ "in" _ expr:statement((i+1)) e:position!() {
+            Token::new(Span::new(s, e), Ast::Let {
+                var: id,
+                assign: Box::new(assign),
+                expr: Box::new(expr),
+            })
         }
 
     rule logic(i: usize) -> Token = precedence! {

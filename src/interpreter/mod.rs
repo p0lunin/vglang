@@ -1,13 +1,16 @@
 use crate::common::{Context, Error, HasName};
-use crate::ir::objects::{AllObject, Callable, CurriedFunction, EnumInstance, FunctionInstanceObject, FunctionObject, EnumVariant};
+use crate::ir::objects::{
+    AllObject, Callable, CurriedFunction, EnumInstance, EnumVariant, FunctionInstanceObject,
+    FunctionObject,
+};
 use crate::ir::types::Type;
 use crate::ir::{parse_expr, type_check_expr, Expr, IrContext};
 use crate::syntax::parse_token;
 use crate::{parse_text, parse_tokens, peg_error_to_showed, type_check_objects};
+use itertools::Itertools;
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
 use std::rc::Rc;
-use itertools::Itertools;
 
 #[derive(Debug)]
 pub struct Interpreter<'a> {
@@ -42,7 +45,8 @@ impl<'a> Interpreter<'a> {
                 objects: vec![],
                 parent: None,
             },
-        ).map_err(|e| e.display(text))
+        )
+            .map_err(|e| e.display(text))
     }
 
     fn eval_expr(&self, e: Expr, ctx: &Context<ByteCode>) -> Result<ByteCode, Error> {
@@ -56,9 +60,11 @@ impl<'a> Interpreter<'a> {
                         _ => Err(Error::Span(span)),
                     },
                     AllObject::EnumVariantInstance(inst) => {
-                        let datas = inst.data.iter().map(|e| {
-                            self.eval_expr(e.clone(), ctx)
-                        }).collect::<Result<Vec<_>, _>>()?;
+                        let datas = inst
+                            .data
+                            .iter()
+                            .map(|e| self.eval_expr(e.clone(), ctx))
+                            .collect::<Result<Vec<_>, _>>()?;
                         Ok(ByteCode::EnumVariant(inst.variant.clone(), datas))
                     }
                     o => Ok(ByteCode::Object(o)),
@@ -89,16 +95,25 @@ impl<'a> Interpreter<'a> {
             Callable::FuncDef(f1) => match self.functions.iter().find(|&f2| **f1 == *f2.def) {
                 Some(obj) => {
                     let ctx = Context {
-                        objects: f.scope.iter().zip(obj.args.iter()).map(|(e, a)|
-                            self.eval_expr(e.clone(), ctx)
-                                .map(|b| ByteCode::Var(a.name.clone().inner(), Box::new(b))))
+                        objects: f
+                            .scope
+                            .iter()
+                            .zip(obj.args.iter())
+                            .map(|(e, a)| {
+                                self.eval_expr(e.clone(), ctx)
+                                    .map(|b| ByteCode::Var(a.name.clone().inner(), Box::new(b)))
+                            })
                             .collect::<Result<Vec<_>, _>>()?,
                         parent: Some(ctx),
                     };
                     self.eval_expr(obj.body.as_ref().clone(), &ctx)
-                },
-                None => Err(Error::Custom(f.orig.name().span, "Not found".to_owned(), "this".to_owned())),
-            }
+                }
+                None => Err(Error::Custom(
+                    f.orig.name().span,
+                    "Not found".to_owned(),
+                    "this".to_owned(),
+                )),
+            },
             _ => unimplemented!(),
         }
     }
@@ -118,7 +133,7 @@ impl HasName for ByteCode {
             ByteCode::Object(o) => o.name(),
             ByteCode::Var(v, _) => v.as_str(),
             ByteCode::Int(i) => unreachable!(),
-            ByteCode::EnumVariant(e, _) => e.name()
+            ByteCode::EnumVariant(e, _) => e.name(),
         }
     }
 }
@@ -131,7 +146,7 @@ impl Display for ByteCode {
             ByteCode::EnumVariant(e, data) => {
                 write!(f, "{}", e)?;
                 match data.as_slice() {
-                    [] => {},
+                    [] => {}
                     [xs @ ..] => {
                         write!(f, ": ");
                         write!(f, "({})", xs.iter().map(|d| d.to_string()).join(", "))?;

@@ -461,12 +461,16 @@ impl Display for EnumVariantInstance {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(f, "{}", self.variant)?;
         match self.data.is_empty() {
-            true => {},
+            true => {}
             false => {
                 f.write_str("<")?;
-                f.write_str(&self.data.iter().map(|o| {
-                    o.try_get_type().unwrap().borrow().to_string()
-                }).join(", "))?;
+                f.write_str(
+                    &self
+                        .data
+                        .iter()
+                        .map(|o| o.try_get_type().unwrap().borrow().to_string())
+                        .join(", "),
+                )?;
                 f.write_str(">")?;
             }
         }

@@ -1,5 +1,5 @@
 use crate::common::{AddSpan, Context, Error, Span, Spanned, VecType};
-use crate::ir::objects::{AllObject, TypeObject};
+use crate::ir::objects::{AllObject, TypeObject, Var};
 use crate::ir::types::base_types::Int;
 use crate::ir::types::{Type, TypeKind};
 use crate::ir::IrContext;
@@ -25,6 +25,11 @@ pub enum Expr {
     LeOrEq(Box<Expr>, Box<Expr>),
     Neg(Box<Expr>),
     Object(Spanned<AllObject>),
+    Let {
+        var: Rc<Var>,
+        assign: Box<Expr>,
+        expr: Box<Expr>,
+    },
 }
 
 macro_rules! impl_op {
@@ -57,6 +62,11 @@ impl Expr {
             Expr::Le(l, r) => l.span().extend(&r.span()),
             Expr::LeOrEq(l, r) => l.span().extend(&r.span()),
             Expr::Neg(l) => l.span(),
+            Expr::Let {
+                var,
+                assign: _,
+                expr,
+            } => var.name.span.extend(&expr.span()),
         }
     }
     pub fn add(self, other: Expr) -> Self {
@@ -204,5 +214,21 @@ pub fn parse_expr(
         Ast::Slice(_) => unimplemented!(),
         Ast::Implication(_, _) => Err(Error::Span(token.span)),
         Ast::Named(_, _) => Err(Error::Span(token.span)),
+        Ast::Let { var, assign, expr } => {
+            let assign = parse_expr(*assign, ctx, ir_ctx)?;
+            let var = Rc::new(Var {
+                name: var,
+                ty: assign.try_get_type().unwrap(),
+            });
+            let ctx = Context {
+                objects: vec![AllObject::Var(var.clone())],
+                parent: Some(ctx),
+            };
+            Ok(Expr::Let {
+                var,
+                assign: Box::new(assign),
+                expr: Box::new(parse_expr(*expr, &ctx, ir_ctx)?),
+            })
+        }
     }
 }
