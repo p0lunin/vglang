@@ -129,13 +129,12 @@ fn monomorphize_function(
     ctx: &Context<'_, AllObject>,
     ir_ctx: &mut IrContext,
 ) -> Result<Rc<FunctionInstanceObject>, Error> {
-    let mut generics = HashMap::<String, Rc<RefCell<Type>>>::new();
-    generics.extend(helper(
+    let generics = vec_generics_to_hashmap(helper(
         &function.orig.ftype(),
         &function.scope,
         ctx,
         ir_ctx,
-    )?);
+    )?)?;
     let inst = FunctionInstanceObject {
         orig: function.orig.clone(),
         ftype: monomorphize_type(&function.ftype, &generics, ctx, ir_ctx)?,
@@ -175,6 +174,31 @@ fn helper(
             unreachable!()
         }
     }
+}
+
+fn vec_generics_to_hashmap(generics: Vec<(String, Rc<RefCell<Type>>)>) -> Result<HashMap<String, Rc<RefCell<Type>>>, Error> {
+    let cap = generics.capacity();
+    generics.into_iter().fold(Ok(HashMap::with_capacity(cap)), |mut map, (name, val)| {
+        let mut map = map?;
+        let val_to_insert = match map.get(&name) {
+            Some(v) => {
+                let v1_borrowed = v.borrow();
+                let v2_borrowed = val.borrow();
+                let span = v2_borrowed.span().extend(&v1_borrowed.span());
+                if v1_borrowed.is_part_of(v2_borrowed.deref()) {
+                    val.clone()
+                }
+                else {
+                    Rc::new(RefCell::new(v1_borrowed.deref().clone().and(v2_borrowed.deref().clone()).spanned_err(span)?))  
+                }
+            }
+            None => {
+                val
+            }
+        };
+        map.insert(name, val_to_insert);
+        Ok(map)
+    })
 }
 
 fn monomorphize_type(

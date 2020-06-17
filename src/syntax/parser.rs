@@ -31,7 +31,7 @@ peg::parser! { grammar lang() for str {
         }
 
     pub rule type_definition(i: usize) -> Token
-        = logic(i)
+        = statement(i)
 
     rule FunctionDef(i: usize) -> Spanned<TopLevelToken>
         = start:position!() name:ident() _ gs:generics(1) _ ":" inli(i) ftype:type_definition(i) new_line() end:position!() {

@@ -1,9 +1,8 @@
 use clap::{App, Arg};
 use fsmcreator::interpreter::Interpreter;
-use fsmcreator::{parse_text, parse_tokens, peg_error_to_showed, type_check_objects};
-use std::fs::File;
+use fsmcreator::compile_file;
 use std::io;
-use std::io::{stdin, Read, Write};
+use std::io::{stdin, Write};
 
 fn main() {
     let app = App::new("Tekstkvest")
@@ -16,6 +15,13 @@ fn main() {
                 .long("file")
                 .takes_value(true)
                 .help("path to file with script"),
+        )
+        .arg(
+            Arg::with_name("std")
+                .short("s")
+                .long("std")
+                .takes_value(true)
+                .help("path to std"),
         );
     let matches = app.get_matches();
     let path_to_file = match matches.value_of("file") {
@@ -25,37 +31,27 @@ fn main() {
             return;
         }
     };
-    let mut file = match File::open(path_to_file) {
-        Ok(f) => f,
+    let path_to_std = match matches.value_of("std") {
+        Some(s) => s,
+        None => {
+            println!("Write path to std");
+            return;
+        }
+    };
+    let (ctx, _) = match compile_file(path_to_std, None) {
+        Ok(ctx) => ctx,
         Err(e) => {
             println!("{}", e);
             return;
         }
     };
-    let mut data = String::new();
-    file.read_to_string(&mut data).unwrap();
-    let ast = match parse_text(&data) {
-        Ok(d) => d,
+    let (ctx, ir_ctx) = match compile_file(path_to_file,Some(&ctx)) {
+        Ok(ctx) => ctx,
         Err(e) => {
-            println!("{}", peg_error_to_showed(e, &data));
+            println!("{}", e);
             return;
         }
     };
-    let (ctx, mut ir_ctx) = match parse_tokens(ast) {
-        Ok(t) => t,
-        Err(errs) => {
-            errs.into_iter()
-                .for_each(|e| println!("{}\n", e.display(&data)));
-            return;
-        }
-    };
-    match type_check_objects(Some(&ctx), &mut ir_ctx) {
-        Err(e) => {
-            println!("{}", e.display(&data));
-            return;
-        }
-        Ok(()) => {}
-    }
     println!("Types: ");
     ctx.objects.iter().for_each(|o| {
         println!("{}\n", o);
@@ -72,7 +68,7 @@ fn main() {
 fn repl(s: &str, mut f: impl FnMut(String) -> String) {
     loop {
         print!("{}", s);
-        io::stdout().flush();
+        io::stdout().flush().unwrap();
         let mut data = String::new();
         stdin().read_line(&mut data).expect("Error when read line");
         data.pop();

@@ -30,6 +30,12 @@ pub struct Var {
     pub ty: Rc<RefCell<Type>>,
 }
 
+impl Display for Var {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "({}: {})", self.name, self.ty.borrow())
+    }
+}
+
 impl Var {
     pub fn try_get_member(&self, name: &str) -> Option<AllObject> {
         match Type::get_inner_cell(&self.ty).borrow().deref() {

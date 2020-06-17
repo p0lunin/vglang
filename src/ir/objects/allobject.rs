@@ -8,7 +8,7 @@ use crate::ir::objects::{
 use crate::ir::types::Type;
 use crate::ir::IrContext;
 use std::cell::RefCell;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Display, Formatter, Write};
 use std::mem;
 use std::rc::Rc;
 
@@ -31,7 +31,7 @@ impl Display for AllObject {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         match self {
             AllObject::Type(t) => f.write_str(&format!("{}", t)),
-            AllObject::Var(_) => unimplemented!(),
+            AllObject::Var(v) => f.write_str(&format!("{}", v)),
             AllObject::FunctionDefinition(o) => Display::fmt(&o, f),
             AllObject::CurriedFunction(_) => unimplemented!(),
             AllObject::Arg(_) => unimplemented!(),

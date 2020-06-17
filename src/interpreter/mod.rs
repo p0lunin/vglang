@@ -9,8 +9,9 @@ use crate::syntax::parse_token;
 use crate::{parse_text, parse_tokens, peg_error_to_showed, type_check_objects};
 use itertools::Itertools;
 use std::fmt::{Display, Formatter};
-use std::ops::Deref;
+use std::ops::{Deref, Add, Sub, Mul, Div};
 use std::rc::Rc;
+use std::ops;
 
 #[derive(Debug)]
 pub struct Interpreter<'a> {
@@ -71,16 +72,35 @@ impl<'a> Interpreter<'a> {
                 }
             }
             Expr::Int(i) => Ok(ByteCode::Int(i.inner())),
-            Expr::Add(l, r) => {
-                let new_span = l.span().extend(&r.span());
-                let left = self.eval_expr(*l, ctx)?;
-                let right = self.eval_expr(*r, ctx)?;
-                match (left, right) {
-                    (ByteCode::Int(i1), ByteCode::Int(i2)) => Ok(ByteCode::Int(i1 + i2)),
-                    _ => Err(Error::Span(new_span)),
-                }
+            Expr::Add(l, r) => self.eval_arithmetic_op(l, r, ctx, ops::Add::add),
+            Expr::Sub(l, r) => self.eval_arithmetic_op(l, r, ctx, ops::Sub::sub),
+            Expr::Mul(l, r) => self.eval_arithmetic_op(l, r, ctx, ops::Mul::mul),
+            Expr::Div(l, r) => self.eval_arithmetic_op(l, r, ctx, ops::Div::div),
+            Expr::Pow(l, r) => self.eval_arithmetic_op(l, r, ctx, |l, r| l.pow(r as u32)),
+            Expr::And(_, _) => unimplemented!(),
+            Expr::Or(_, _) => unimplemented!(),
+            Expr::Gr(_, _) => unimplemented!(),
+            Expr::Eq(_, _) => unimplemented!(),
+            Expr::NotEq(_, _) => unimplemented!(),
+            Expr::GrOrEq(_, _) => unimplemented!(),
+            Expr::Le(_, _) => unimplemented!(),
+            Expr::LeOrEq(_, _) => unimplemented!(),
+            Expr::Neg(l) => {
+                let span = l.span();
+                self.eval_expr(*l, ctx).and_then(|b| match b {
+                    ByteCode::Int(i) => Ok(ByteCode::Int(-i)),
+                    s => Err(Error::Span(span))
+                })
+            },
+            Expr::Let { var, assign, expr } => {
+                let var_val = self.eval_expr(*assign, ctx)?;
+                let var = ByteCode::Var(var.name.clone().inner(), Box::new(var_val));
+                let ctx = Context {
+                    objects: vec![var],
+                    parent: Some(ctx)
+                };
+                return self.eval_expr(*expr, &ctx);
             }
-            _ => unimplemented!(),
         }
     }
 
@@ -117,6 +137,17 @@ impl<'a> Interpreter<'a> {
             _ => unimplemented!(),
         }
     }
+
+    fn eval_arithmetic_op<F: Fn(i128, i128) -> i128>(&self, left: Box<Expr>, right: Box<Expr>, ctx: &Context<ByteCode>, f: F) -> Result<ByteCode, Error> {
+        let new_span = left.span().extend(&right.span());
+        let left = self.eval_expr(*left, ctx)?;
+        let right = self.eval_expr(*right, ctx)?;
+        match (left, right) {
+            (ByteCode::Int(i1), ByteCode::Int(i2)) => Ok(ByteCode::Int(f(i1, i2))),
+            _ => Err(Error::Span(new_span)),
+        }
+    }
+
 }
 
 #[derive(Debug, PartialEq, Clone)]

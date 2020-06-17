@@ -117,12 +117,13 @@ fn get_bool_type() -> Rc<Spanned<Type>> {
 
 pub fn parse_tokens<'a>(
     tokens: Vec<Spanned<TopLevelToken>>,
+    top: Option<&'a Context<'a, AllObject>>,
 ) -> Result<(Context<'a, AllObject>, IrContext), Vec<Error>> {
     let mut ir_ctx = IrContext::new();
     let mut errors = vec![];
     let mut ctx = Context {
         objects: vec![],
-        parent: None,
+        parent: top,
     };
     let mut function_defs = vec![];
     let mut function_impls = VecDeque::new();
