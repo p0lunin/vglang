@@ -5,7 +5,7 @@ mod type_check;
 pub mod types;
 
 pub use self::{
-    expr::{parse_expr, Expr},
+    expr::{parse_expr, Expr, ExprKind},
     transform::{parse_function, parse_tokens},
     type_check::*,
 };
@@ -21,12 +21,24 @@ pub struct IrContext {
     pub specialized_functions: Vec<Rc<FunctionInstanceObject>>,
 }
 
+fn append<T>(mut l: Vec<T>, mut r: Vec<T>) -> Vec<T> {
+    l.append(&mut r);
+    l
+}
+
 impl IrContext {
     pub fn new() -> Self {
         Self {
             functions: vec![],
             specialized_enums: vec![],
             specialized_functions: vec![],
+        }
+    }
+    pub fn extend(self, other: Self) -> Self {
+        Self {
+            functions: append(self.functions, other.functions),
+            specialized_enums: append(self.specialized_enums, other.specialized_enums),
+            specialized_functions: append(self.specialized_functions, other.specialized_functions)
         }
     }
     pub fn add_function(&mut self, function: FunctionObject) -> Result<(), Error> {

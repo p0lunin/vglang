@@ -17,9 +17,9 @@ impl Function {
             .borrow()
             .is_part_of(self.get_value.borrow().deref())
             && self
-            .return_value
-            .borrow()
-            .is_part_of(&other.return_value.borrow().deref())
+                .return_value
+                .borrow()
+                .is_part_of(&other.return_value.borrow().deref())
     }
 }
 

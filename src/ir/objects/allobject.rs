@@ -2,13 +2,12 @@ use crate::common::{Context, Error, HasName, Span};
 use crate::ir::expr::Expr;
 use crate::ir::objects::{
     Arg, Callable, CreateEnumInstanceFunc, CreateEnumVariantFunc, CurriedFunction, EnumInstance,
-    EnumType, EnumVariant, EnumVariantInstance, FunctionDefinition, FunctionObject, TypeObject,
-    Var,
+    EnumType, EnumVariant, EnumVariantInstance, FunctionDefinition, TypeObject, Var,
 };
 use crate::ir::types::Type;
 use crate::ir::IrContext;
 use std::cell::RefCell;
-use std::fmt::{Display, Formatter, Write};
+use std::fmt::{Display, Formatter};
 use std::mem;
 use std::rc::Rc;
 

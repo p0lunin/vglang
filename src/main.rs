@@ -1,6 +1,6 @@
 use clap::{App, Arg};
-use fsmcreator::interpreter::Interpreter;
 use fsmcreator::compile_file;
+use fsmcreator::interpreter::Interpreter;
 use std::io;
 use std::io::{stdin, Write};
 
@@ -38,14 +38,14 @@ fn main() {
             return;
         }
     };
-    let (ctx, _) = match compile_file(path_to_std, None) {
+    let (ctx, ir_ctx1) = match compile_file(path_to_std, None) {
         Ok(ctx) => ctx,
         Err(e) => {
             println!("{}", e);
             return;
         }
     };
-    let (ctx, ir_ctx) = match compile_file(path_to_file,Some(&ctx)) {
+    let (ctx, ir_ctx) = match compile_file(path_to_file, Some(&ctx)) {
         Ok(ctx) => ctx,
         Err(e) => {
             println!("{}", e);

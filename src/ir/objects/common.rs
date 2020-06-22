@@ -1,5 +1,5 @@
-use crate::common::{Error, Spanned};
-use crate::ir::objects::{AllObject, EnumInstance, EnumType};
+use crate::common::Spanned;
+use crate::ir::objects::{AllObject, EnumType};
 use crate::ir::types::Type;
 use std::cell::RefCell;
 use std::fmt::{Display, Formatter};

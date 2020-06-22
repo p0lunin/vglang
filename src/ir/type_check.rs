@@ -1,11 +1,11 @@
-use crate::common::{Context, Error, Spanned, SpannedError};
+use crate::common::{Context, Error, Spanned, SpannedError, Span};
 use crate::ir::objects::{
-    monomorphization, AllObject, Callable, CurriedFunction, EnumInstance, EnumType,
-    EnumVariantInstance, FunctionInstanceObject, FunctionObject, Var,
+    monomorphization, AllObject, CurriedFunction, EnumInstance, FunctionInstanceObject,
+    FunctionObject,
 };
 use crate::ir::types::base_types::Function;
 use crate::ir::types::{OneTypeKind, Type};
-use crate::ir::{parse_expr, Expr, IrContext};
+use crate::ir::{Expr, ExprKind, IrContext};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ops::Deref;
@@ -64,10 +64,7 @@ macro_rules! binary_op {
         let left_br = left.borrow();
         let right_br = left.borrow();
         Ok(Rc::new(RefCell::new(
-            left_br
-                .clone()
-                .$op(right_br.clone())
-                .spanned_err(new_span)?,
+            left_br.clone().$op(&right_br).spanned_err(new_span)?,
         )))
     }};
 }
@@ -77,28 +74,28 @@ pub fn type_check_expr(
     ctx: &Context<'_, AllObject>,
     ir_ctx: &mut IrContext,
 ) -> Result<Rc<RefCell<Type>>, Error> {
-    match expr {
-        Expr::Int(i) => Ok(i.get_type()),
-        Expr::Add(l, r) => binary_op!(l, r, ctx, ir_ctx, add),
-        Expr::Sub(l, r) => binary_op!(l, r, ctx, ir_ctx, sub),
-        Expr::Object(o) => type_check_object(o, ctx, ir_ctx),
-        Expr::Mul(l, r) => binary_op!(l, r, ctx, ir_ctx, mul),
-        Expr::Div(l, r) => binary_op!(l, r, ctx, ir_ctx, div),
-        Expr::Pow(l, r) => binary_op!(l, r, ctx, ir_ctx, pow),
-        Expr::And(_, _) => unimplemented!(),
-        Expr::Or(_, _) => unimplemented!(),
-        Expr::Gr(_, _) => unimplemented!(),
-        Expr::Eq(_, _) => unimplemented!(),
-        Expr::NotEq(_, _) => unimplemented!(),
-        Expr::GrOrEq(_, _) => unimplemented!(),
-        Expr::Le(_, _) => unimplemented!(),
-        Expr::LeOrEq(_, _) => unimplemented!(),
-        Expr::Neg(e) => type_check_expr(&e, ctx, ir_ctx).and_then(|ty| {
+    match &expr.kind {
+        ExprKind::Int(_) => Ok(expr.ty.clone()),
+        ExprKind::Add(l, r) => binary_op!(l, r, ctx, ir_ctx, add),
+        ExprKind::Sub(l, r) => binary_op!(l, r, ctx, ir_ctx, sub),
+        ExprKind::Object(o) => type_check_object(o, ctx, ir_ctx),
+        ExprKind::Mul(l, r) => binary_op!(l, r, ctx, ir_ctx, mul),
+        ExprKind::Div(l, r) => binary_op!(l, r, ctx, ir_ctx, div),
+        ExprKind::Pow(l, r) => binary_op!(l, r, ctx, ir_ctx, pow),
+        ExprKind::And(_, _) => unimplemented!(),
+        ExprKind::Or(_, _) => unimplemented!(),
+        ExprKind::Gr(_, _) => Ok(expr.ty.clone()),
+        ExprKind::Eq(_, _) => Ok(expr.ty.clone()),
+        ExprKind::NotEq(_, _) => Ok(expr.ty.clone()),
+        ExprKind::GrOrEq(_, _) => Ok(expr.ty.clone()),
+        ExprKind::Le(_, _) => Ok(expr.ty.clone()),
+        ExprKind::LeOrEq(_, _) => Ok(expr.ty.clone()),
+        ExprKind::Neg(e) => type_check_expr(&e, ctx, ir_ctx).and_then(|ty| {
             Ok(Rc::new(RefCell::new(
                 ty.borrow().clone().neg().spanned_err(e.span())?,
             )))
         }),
-        Expr::Let { var, assign, expr } => {
+        ExprKind::Let { var, assign, expr } => {
             let val = type_check_expr(assign.as_ref(), ctx, ir_ctx)?;
             let ctx = Context {
                 objects: vec![AllObject::Var(var.clone())],
@@ -106,21 +103,46 @@ pub fn type_check_expr(
             };
             type_check_expr(expr, &ctx, ir_ctx)
         }
+        ExprKind::IfThenElse {
+            condition: _,
+            then_arm: _,
+            else_arm: _,
+        } => Ok(expr.ty.clone()),
     }
 }
 
 fn type_check_object(
-    obj: &Spanned<AllObject>,
+    obj: &AllObject,
     ctx: &Context<'_, AllObject>,
     ir_ctx: &mut IrContext,
 ) -> Result<Rc<RefCell<Type>>, Error> {
-    match &obj.val {
+    match obj {
         AllObject::EnumVariantInstance(v) => v.type_check_self(ctx, ir_ctx),
-        AllObject::CurriedFunction(f) => monomorphize_function(f, ctx, ir_ctx).map(|o| {
+        AllObject::CurriedFunction(f) => monomorphize_function(f, ctx, ir_ctx).and_then(|o| {
+            type_check_func_call(o.ftype.borrow().deref(), &f.scope)?;
             *f.instance.borrow_mut() = Some(o.clone());
-            o.ftype.clone()
+            Ok(o.ftype.clone())
         }),
         o => Ok(o.get_type()),
+    }
+}
+
+fn type_check_func_call(ty: &Type, data: &[Expr]) -> Result<(), Error> {
+    match (&ty.get_inner(), data) {
+        (Type::Function(f), [x, xs @ ..]) => {
+            check_two_types(x.ty.borrow().deref(), f.kind.get_value.borrow().deref(),  x.span())
+                .and_then(|_| type_check_func_call(f.kind.return_value.borrow().deref(), xs))
+        }
+        (t, [x]) => check_two_types(x.ty.borrow().deref(), t, x.span()),
+        (_, []) => Ok(()),
+        _ => unreachable!(),
+    }
+}
+
+fn check_two_types(left: &Type, right: &Type, span: Span) -> Result<(), Error> {
+    match left.is_part_of(right) {
+        true => Ok(()),
+        false => Err(Error::Custom(span, format!("Expected {}, found {}", right, left), "-here".to_string()))
     }
 }
 
@@ -137,7 +159,7 @@ fn monomorphize_function(
     )?)?;
     let inst = FunctionInstanceObject {
         orig: function.orig.clone(),
-        ftype: monomorphize_type(&function.ftype, &generics, ctx, ir_ctx)?,
+        ftype: monomorphize_type(&function.orig.ftype(), &generics, ctx, ir_ctx)?,
     };
     Ok(ir_ctx.create_specialized_function(inst))
 }
@@ -164,41 +186,48 @@ fn helper(
             })
         }
         (Type::Generic(g), [x]) => Ok(vec![(g.clone().inner(), type_check_expr(x, ctx, ir_ctx)?)]),
-        (t, [x]) => match dbg!(x.try_get_type()).unwrap().borrow().is_part_of(dbg!(t)) {
+        (t, [x]) => match x.ty.borrow().is_part_of(t) {
             true => Ok(vec![]),
             false => Err(Error::Span(x.span())),
         },
-        (t, []) => Ok(vec![]),
-        res => {
+        (_, []) => Ok(vec![]),
+        _ => {
             //dbg!(res);
             unreachable!()
         }
     }
 }
 
-fn vec_generics_to_hashmap(generics: Vec<(String, Rc<RefCell<Type>>)>) -> Result<HashMap<String, Rc<RefCell<Type>>>, Error> {
+fn vec_generics_to_hashmap(
+    generics: Vec<(String, Rc<RefCell<Type>>)>,
+) -> Result<HashMap<String, Rc<RefCell<Type>>>, Error> {
     let cap = generics.capacity();
-    generics.into_iter().fold(Ok(HashMap::with_capacity(cap)), |mut map, (name, val)| {
-        let mut map = map?;
-        let val_to_insert = match map.get(&name) {
-            Some(v) => {
-                let v1_borrowed = v.borrow();
-                let v2_borrowed = val.borrow();
-                let span = v2_borrowed.span().extend(&v1_borrowed.span());
-                if v1_borrowed.is_part_of(v2_borrowed.deref()) {
-                    val.clone()
+    generics
+        .into_iter()
+        .fold(Ok(HashMap::with_capacity(cap)), |map, (name, val)| {
+            let mut map = map?;
+            let val_to_insert = match map.get(&name) {
+                Some(v) => {
+                    let v1_borrowed = v.borrow();
+                    let v2_borrowed = val.borrow();
+                    let span = v2_borrowed.span().extend(&v1_borrowed.span());
+                    if v1_borrowed.is_part_of(v2_borrowed.deref()) {
+                        val.clone()
+                    } else {
+                        Rc::new(RefCell::new(
+                            v1_borrowed
+                                .deref()
+                                .clone()
+                                .and(v2_borrowed.deref())
+                                .spanned_err(span)?,
+                        ))
+                    }
                 }
-                else {
-                    Rc::new(RefCell::new(v1_borrowed.deref().clone().and(v2_borrowed.deref().clone()).spanned_err(span)?))  
-                }
-            }
-            None => {
-                val
-            }
-        };
-        map.insert(name, val_to_insert);
-        Ok(map)
-    })
+                None => val,
+            };
+            map.insert(name, val_to_insert);
+            Ok(map)
+        })
 }
 
 fn monomorphize_type(

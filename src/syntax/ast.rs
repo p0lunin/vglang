@@ -59,6 +59,11 @@ pub enum Ast {
         assign: Box<Token>,
         expr: Box<Token>,
     },
+    IfThenElse {
+        if_: Box<Token>,
+        then: Box<Token>,
+        else_: Box<Token>,
+    },
 }
 
 #[derive(Debug, PartialEq)]

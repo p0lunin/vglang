@@ -1,4 +1,4 @@
-use crate::common::{Error, Span, Spanned};
+use crate::common::{Error, Span, Spanned, VecType};
 use crate::ir::objects::{EnumInstance, EnumType, EnumVariant, EnumVariantInstance};
 use crate::ir::types::base_types::{Function, Int, TypeType, Unknown};
 use crate::ir::types::{OneTypeKind, TypeKind, TypeOperable};
@@ -118,40 +118,47 @@ impl Type {
         }
     }
 
-    pub fn unknown(span: Span) -> Type {
-        Type::Unknown(OneTypeKind {
+    pub fn unknown(span: Span) -> Rc<RefCell<Type>> {
+        Rc::new(RefCell::new(Type::Unknown(OneTypeKind {
             name: None,
             kind: Spanned::new(Unknown, span),
-        })
+        })))
     }
 
-    pub fn type_type() -> Type {
-        Type::Type(OneTypeKind {
+    pub fn type_type() -> Rc<RefCell<Type>> {
+        Rc::new(RefCell::new(Type::Type(OneTypeKind {
             name: None,
             kind: Spanned::new(TypeType, Span::new(0, 0)),
-        })
+        })))
+    }
+
+    pub fn int_val(val: i128, span: Span) -> Rc<RefCell<Self>> {
+        Rc::new(RefCell::new(Type::Int(TypeKind {
+            name: None,
+            kinds: Spanned::new(VecType::one(Int::Value(val)), span),
+        })))
     }
 }
 
 macro_rules! apply_op {
     ($self:tt, $value:tt, $op:tt) => {
         match $self {
-            Type::Int(t) => t.$op($value).map(Type::Int),
-            Type::Type(t) => t.$op($value).map(Type::Type),
-            Type::Unknown(t) => t.$op($value).map(Type::Unknown),
-            Type::Function(t) => t.$op($value).map(Type::Function),
+            Type::Int(t) => t.clone().$op($value).map(Type::Int),
+            Type::Type(t) => t.clone().$op($value).map(Type::Type),
+            Type::Unknown(t) => t.clone().$op($value).map(Type::Unknown),
+            Type::Function(t) => t.clone().$op($value).map(Type::Function),
             Type::AnotherType(t) => {
                 let mut inner = t.borrow().clone();
                 inner.remove_name();
-                inner.$op($value)
+                inner.$op(&$value)
             }
             Type::ParenthesisType(t) => Ok(Type::ParenthesisType(Rc::new(RefCell::new(
-                t.borrow().deref().clone().$op($value)?,
+                t.borrow().deref().clone().$op(&$value)?,
             )))),
             Type::Named(_, t) => {
                 let mut inner = t.borrow().clone();
                 inner.remove_name();
-                inner.$op($value)
+                inner.$op(&$value)
             }
             Type::Enum(e) => Err(format!(
                 "Cannot {} enum type {} to {}",
@@ -260,47 +267,47 @@ impl Type {
         }
     }
 
-    pub fn add(self, value: Type) -> Result<Self, String> {
+    pub fn add(&self, value: &Type) -> Result<Self, String> {
         let value = value.get_inner();
         apply_op!(self, value, add)
     }
 
-    pub fn sub(self, value: Type) -> Result<Self, String> {
+    pub fn sub(&self, value: &Type) -> Result<Self, String> {
         let value = value.get_inner().neg()?;
         apply_op!(self, value, add)
     }
 
-    pub fn and(self, value: Type) -> Result<Self, String> {
+    pub fn and(&self, value: &Type) -> Result<Self, String> {
         let value = value.get_inner();
         apply_op!(self, value, and)
     }
 
-    pub fn or(self, value: Type) -> Result<Self, String> {
+    pub fn or(&self, value: &Type) -> Result<Self, String> {
         let value = value.get_inner();
         apply_op!(self, value, or)
     }
 
-    pub fn div(self, value: Type) -> Result<Self, String> {
+    pub fn div(&self, value: &Type) -> Result<Self, String> {
         let value = value.get_inner();
         apply_op!(self, value, div)
     }
 
-    pub fn mul(self, value: Type) -> Result<Self, String> {
+    pub fn mul(&self, value: &Type) -> Result<Self, String> {
         let value = value.get_inner();
         apply_op!(self, value, mul)
     }
 
-    pub fn pow(self, value: Type) -> Result<Self, String> {
+    pub fn pow(&self, value: &Type) -> Result<Self, String> {
         let value = value.get_inner();
         apply_op!(self, value, pow)
     }
 
-    pub fn neg(self) -> Result<Self, String> {
+    pub fn neg(&self) -> Result<Self, String> {
         match self {
-            Type::Int(t) => t.neg().map(Type::Int),
-            Type::Type(t) => t.neg().map(Type::Type),
-            Type::Unknown(t) => t.neg().map(Type::Unknown),
-            Type::Function(t) => t.neg().map(Type::Function),
+            Type::Int(t) => t.clone().neg().map(Type::Int),
+            Type::Type(t) => t.clone().neg().map(Type::Type),
+            Type::Unknown(t) => t.clone().neg().map(Type::Unknown),
+            Type::Function(t) => t.clone().neg().map(Type::Function),
             Type::AnotherType(t) => {
                 let mut inner = t.borrow().clone();
                 inner.remove_name();

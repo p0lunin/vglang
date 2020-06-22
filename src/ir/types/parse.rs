@@ -29,16 +29,16 @@ pub fn parse_type_helper(
     let span = token.span;
     match token.ast {
         Ast::And(l, r) => parse_type_helper(*l, ctx, ir_ctx).and_then(|left| {
-            parse_type_helper(*r, ctx, ir_ctx).and_then(|right| left.and(right).spanned_err(span))
+            parse_type_helper(*r, ctx, ir_ctx).and_then(|right| left.and(&right).spanned_err(span))
         }),
         Ast::Or(l, r) => parse_type_helper(*l, ctx, ir_ctx).and_then(|left| {
-            parse_type_helper(*r, ctx, ir_ctx).and_then(|right| left.or(right).spanned_err(span))
+            parse_type_helper(*r, ctx, ir_ctx).and_then(|right| left.or(&right).spanned_err(span))
         }),
         Ast::Add(l, r) => parse_type_helper(*l, ctx, ir_ctx).and_then(|left| {
-            parse_type_helper(*r, ctx, ir_ctx).and_then(|right| left.add(right).spanned_err(span))
+            parse_type_helper(*r, ctx, ir_ctx).and_then(|right| left.add(&right).spanned_err(span))
         }),
         Ast::Sub(l, r) => parse_type_helper(*l, ctx, ir_ctx).and_then(|left| {
-            parse_type_helper(*r, ctx, ir_ctx).and_then(|right| left.sub(right).spanned_err(span))
+            parse_type_helper(*r, ctx, ir_ctx).and_then(|right| left.sub(&right).spanned_err(span))
         }),
         Ast::Neg(t) => {
             parse_type_helper(*t, ctx, ir_ctx).and_then(|left| left.neg().spanned_err(span))
@@ -131,11 +131,8 @@ pub fn parse_type_helper(
             Rc::new(RefCell::new(parse_type_helper(*def, ctx, ir_ctx)?)),
         )),
         _ => parse_expr(token, ctx, ir_ctx).and_then(|e| {
-            e.call().and_then(|e| {
-                e.try_get_type()
-                    .map(|t| Type::AnotherType(Spanned::new(t, span)))
-                    .ok_or(Error::Span(span))
-            })
+            e.call()
+                .map(|e| Type::AnotherType(Spanned::new(e.ty.clone(), e.span())))
         }),
     }
 }

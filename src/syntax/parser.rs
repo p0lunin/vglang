@@ -88,7 +88,7 @@ peg::parser! { grammar lang() for str {
         }
 
     rule statement(i: usize) -> Token
-        = let_stat(i) / logic(i)
+        = let_stat(i) / if_then_else(i) / logic(i)
 
     rule let_stat(i: usize) -> Token
         = s:position!() "let" __ id:ident() _ "=" _ assign:statement(i) _ "in" _ expr:statement((i+1)) e:position!() {
@@ -97,6 +97,14 @@ peg::parser! { grammar lang() for str {
                 assign: Box::new(assign),
                 expr: Box::new(expr),
             })
+        }
+
+    rule if_then_else(i: usize) -> Token
+        = s:position!() "if" __ if_:logic(i) inli((i+1)) "then" __ then:statement((i+1)) inli((i+1)) "else" __ else_:statement((i+1)) e:position!() {
+            let if_ = Box::new(if_);
+            let then = Box::new(then);
+            let else_ = Box::new(else_);
+            Token::new(Span::new(s, e), Ast::IfThenElse { if_, then, else_ })
         }
 
     rule logic(i: usize) -> Token = precedence! {

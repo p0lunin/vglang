@@ -1,17 +1,17 @@
 use crate::common::{Context, Error, HasName};
 use crate::ir::objects::{
-    AllObject, Callable, CurriedFunction, EnumInstance, EnumVariant, FunctionInstanceObject,
-    FunctionObject,
+    AllObject, Callable, CurriedFunction, EnumInstance, EnumVariant, FunctionObject,
 };
 use crate::ir::types::Type;
-use crate::ir::{parse_expr, type_check_expr, Expr, IrContext};
+use crate::ir::{parse_expr, type_check_expr, Expr, ExprKind, IrContext};
+use crate::peg_error_to_showed;
 use crate::syntax::parse_token;
-use crate::{parse_text, parse_tokens, peg_error_to_showed, type_check_objects};
 use itertools::Itertools;
 use std::fmt::{Display, Formatter};
-use std::ops::{Deref, Add, Sub, Mul, Div};
-use std::rc::Rc;
 use std::ops;
+use std::ops::Deref;
+use std::rc::Rc;
+use std::cell::RefCell;
 
 #[derive(Debug)]
 pub struct Interpreter<'a> {
@@ -26,7 +26,7 @@ impl<'a> Interpreter<'a> {
         let IrContext {
             functions,
             specialized_enums,
-            specialized_functions,
+            specialized_functions: _,
         } = &ir;
         Self {
             enums: specialized_enums.clone(),
@@ -47,59 +47,92 @@ impl<'a> Interpreter<'a> {
                 parent: None,
             },
         )
-            .map_err(|e| e.display(text))
+        .map_err(|e| e.display(text))
     }
 
     fn eval_expr(&self, e: Expr, ctx: &Context<ByteCode>) -> Result<ByteCode, Error> {
-        match e {
-            Expr::Object(o) => {
-                let span = o.span;
-                match o.inner() {
-                    AllObject::CurriedFunction(f) => self.eval_fn(&f, ctx),
-                    AllObject::Arg(a) => match ctx.find(a.name.as_str()) {
-                        Some(ByteCode::Var(_, b)) => Ok(b.as_ref().clone()),
-                        _ => Err(Error::Span(span)),
-                    },
-                    AllObject::EnumVariantInstance(inst) => {
-                        let datas = inst
-                            .data
-                            .iter()
-                            .map(|e| self.eval_expr(e.clone(), ctx))
-                            .collect::<Result<Vec<_>, _>>()?;
-                        Ok(ByteCode::EnumVariant(inst.variant.clone(), datas))
-                    }
-                    o => Ok(ByteCode::Object(o)),
+        let span = e.span();
+        match e.kind {
+            ExprKind::Object(o) => match o {
+                AllObject::CurriedFunction(f) => self.eval_fn(&f, ctx),
+                AllObject::Arg(a) => match ctx.find(a.name.as_str()) {
+                    Some(ByteCode::Var(_, b)) => Ok(b.as_ref().clone()),
+                    _ => Err(Error::Span(span)),
+                },
+                AllObject::EnumVariantInstance(inst) => {
+                    let datas = inst
+                        .data
+                        .iter()
+                        .map(|e| self.eval_expr(e.clone(), ctx))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    Ok(ByteCode::EnumVariant(inst.variant.clone(), datas))
                 }
-            }
-            Expr::Int(i) => Ok(ByteCode::Int(i.inner())),
-            Expr::Add(l, r) => self.eval_arithmetic_op(l, r, ctx, ops::Add::add),
-            Expr::Sub(l, r) => self.eval_arithmetic_op(l, r, ctx, ops::Sub::sub),
-            Expr::Mul(l, r) => self.eval_arithmetic_op(l, r, ctx, ops::Mul::mul),
-            Expr::Div(l, r) => self.eval_arithmetic_op(l, r, ctx, ops::Div::div),
-            Expr::Pow(l, r) => self.eval_arithmetic_op(l, r, ctx, |l, r| l.pow(r as u32)),
-            Expr::And(_, _) => unimplemented!(),
-            Expr::Or(_, _) => unimplemented!(),
-            Expr::Gr(_, _) => unimplemented!(),
-            Expr::Eq(_, _) => unimplemented!(),
-            Expr::NotEq(_, _) => unimplemented!(),
-            Expr::GrOrEq(_, _) => unimplemented!(),
-            Expr::Le(_, _) => unimplemented!(),
-            Expr::LeOrEq(_, _) => unimplemented!(),
-            Expr::Neg(l) => {
+                AllObject::FunctionDefinition(f) => {
+                    self.eval_fn(&Rc::new(CurriedFunction {
+                        ftype: f.ftype.clone(),
+                        scope: vec![],
+                        orig: Callable::FuncDef(f),
+                        instance: RefCell::new(None)
+                    }), ctx)
+                }
+                o => Ok(ByteCode::Object(o)),
+            },
+            ExprKind::Int(i) => Ok(ByteCode::Int(i)),
+            ExprKind::Add(l, r) => self.eval_arithmetic_op(l, r, ctx, ops::Add::add),
+            ExprKind::Sub(l, r) => self.eval_arithmetic_op(l, r, ctx, ops::Sub::sub),
+            ExprKind::Mul(l, r) => self.eval_arithmetic_op(l, r, ctx, ops::Mul::mul),
+            ExprKind::Div(l, r) => self.eval_arithmetic_op(l, r, ctx, ops::Div::div),
+            ExprKind::Pow(l, r) => self.eval_arithmetic_op(l, r, ctx, |l, r| l.pow(r as u32)),
+            ExprKind::And(_, _) => unimplemented!(),
+            ExprKind::Or(_, _) => unimplemented!(),
+            ExprKind::Gr(l, r) => { 
+                self.eval_logic_func(l, r, ctx, i128::gt)
+            },
+            ExprKind::Eq(l, r) => {
+                self.eval_logic_func(l, r, ctx, i128::eq)
+            },
+            ExprKind::NotEq(l, r) => {
+                self.eval_logic_func(l, r, ctx, i128::ne)
+            },
+            ExprKind::GrOrEq(l, r) => {
+                self.eval_logic_func(l, r, ctx, i128::ge)
+            },
+            ExprKind::Le(l, r) => {
+                self.eval_logic_func(l, r, ctx, i128::lt)
+            },
+            ExprKind::LeOrEq(l, r) => {
+                self.eval_logic_func(l, r, ctx, i128::le)
+            },
+            ExprKind::Neg(l) => {
                 let span = l.span();
                 self.eval_expr(*l, ctx).and_then(|b| match b {
                     ByteCode::Int(i) => Ok(ByteCode::Int(-i)),
-                    s => Err(Error::Span(span))
+                    _ => Err(Error::Span(span)),
                 })
-            },
-            Expr::Let { var, assign, expr } => {
+            }
+            ExprKind::Let { var, assign, expr } => {
                 let var_val = self.eval_expr(*assign, ctx)?;
                 let var = ByteCode::Var(var.name.clone().inner(), Box::new(var_val));
                 let ctx = Context {
                     objects: vec![var],
-                    parent: Some(ctx)
+                    parent: Some(ctx),
                 };
                 return self.eval_expr(*expr, &ctx);
+            }
+            ExprKind::IfThenElse {
+                condition,
+                then_arm,
+                else_arm,
+            } => {
+                let cond = self.eval_expr(*condition, ctx)?;
+                match cond {
+                    ByteCode::EnumVariant(v, _) => match v.orig.name.as_str() {
+                        "True" => self.eval_expr(*then_arm, ctx),
+                        "False" => self.eval_expr(*else_arm, ctx),
+                        _ => unreachable!(),
+                    },
+                    _ => unreachable!(),
+                }
             }
         }
     }
@@ -138,7 +171,43 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    fn eval_arithmetic_op<F: Fn(i128, i128) -> i128>(&self, left: Box<Expr>, right: Box<Expr>, ctx: &Context<ByteCode>, f: F) -> Result<ByteCode, Error> {
+    fn eval_logic_func<F: Fn(&i128, &i128) -> bool>(&self, left: Box<Expr>, right: Box<Expr>, ctx: &Context<'_, ByteCode>, f: F) -> Result<ByteCode, Error> {
+        let left = self.eval_expr(*left, ctx)?;
+        let right = self.eval_expr(*right, ctx)?;
+        match (left, right) {
+            (ByteCode::Int(i1), ByteCode::Int(i2)) => {
+                let bool_enum = match self.ctx.find("Bool").unwrap() {
+                    AllObject::Enum(e) => e,
+                    _ => unreachable!(),
+                }.borrow();
+                match f(&i1, &i2) {
+                    true => Ok(ByteCode::EnumVariant(
+                        bool_enum.variants.iter()
+                            .find(|v| v.orig.name.as_str() == "True")
+                            .unwrap()
+                            .clone(),
+                        vec![]
+                    )),
+                    false => Ok(ByteCode::EnumVariant(
+                        bool_enum.variants.iter()
+                            .find(|v| v.orig.name.as_str() == "False")
+                            .unwrap()
+                            .clone(),
+                        vec![]
+                    ))
+                }
+            }
+            _ => unreachable!()
+        }
+    }
+
+    fn eval_arithmetic_op<F: Fn(i128, i128) -> i128>(
+        &self,
+        left: Box<Expr>,
+        right: Box<Expr>,
+        ctx: &Context<ByteCode>,
+        f: F,
+    ) -> Result<ByteCode, Error> {
         let new_span = left.span().extend(&right.span());
         let left = self.eval_expr(*left, ctx)?;
         let right = self.eval_expr(*right, ctx)?;
@@ -147,7 +216,6 @@ impl<'a> Interpreter<'a> {
             _ => Err(Error::Span(new_span)),
         }
     }
-
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -163,7 +231,7 @@ impl HasName for ByteCode {
         match self {
             ByteCode::Object(o) => o.name(),
             ByteCode::Var(v, _) => v.as_str(),
-            ByteCode::Int(i) => unreachable!(),
+            ByteCode::Int(_) => unreachable!(),
             ByteCode::EnumVariant(e, _) => e.name(),
         }
     }

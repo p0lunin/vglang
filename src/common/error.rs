@@ -112,7 +112,11 @@ pub fn peg_error_to_showed(err: peg::error::ParseError<peg::str::LineCol>, sourc
     let span = Span::new(err.location.offset, err.location.offset + 1);
     let found = match err.location.offset + 1 > source.len() {
         true => "EOF".to_string(),
-        false => source[err.location.offset..].chars().next().unwrap().to_string(),
+        false => source[err.location.offset..]
+            .chars()
+            .next()
+            .unwrap()
+            .to_string(),
     };
     let description = format!("Expected one of {}, but found {:?}", err.expected, found);
     ErrorMsgBuilder::default_one_span(span, source, "ParseError", &description, "- here").build()

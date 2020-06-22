@@ -22,7 +22,7 @@ pub struct Generic {
 
 pub struct EnumType {
     pub(crate) decl: EnumDecl,
-    variants: Vec<Rc<EnumVariant>>,
+    pub(crate) variants: Vec<Rc<EnumVariant>>,
     generics: Vec<Spanned<Generic>>,
 }
 
@@ -246,7 +246,7 @@ impl CreateEnumInstanceFunc {
                 let mut generics = HashMap::new();
                 let mut generics_types = Vec::new();
                 new_data.into_iter().for_each(|(name, data)| {
-                    let ty = data.try_get_type().unwrap();
+                    let ty = data.ty;
                     generics.insert(name, ty.clone());
                     generics_types.push(ty);
                 });
@@ -275,19 +275,19 @@ impl CreateEnumInstanceFunc {
 }
 
 pub fn monomorphization<'a>(
-    data: impl Iterator<Item=&'a Rc<RefCell<Type>>>,
+    data: impl Iterator<Item = &'a Rc<RefCell<Type>>>,
     generics: &HashMap<String, Rc<RefCell<Type>>>,
 ) -> Vec<Rc<RefCell<Type>>> {
     data.map(|t| match Type::get_inner_cell(t).borrow().deref() {
         Type::Generic(n) => generics.get(n.as_str()).unwrap().clone(),
         _ => t.clone(),
     })
-        .collect()
+    .collect()
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct EnumInstanceVariantInstance {
-    variant: Rc<EnumVariant>,
+    pub variant: Rc<EnumVariant>,
     data: Vec<Rc<RefCell<Type>>>,
 }
 
@@ -335,10 +335,10 @@ impl EnumInstance {
     pub fn is_part_of(&self, other: &EnumInstance) -> bool {
         Rc::ptr_eq(&self.orig, &other.orig)
             && self
-            .generics
-            .iter()
-            .zip(other.generics.iter())
-            .all(|(l, r)| l.borrow().is_part_of(r.borrow().deref()))
+                .generics
+                .iter()
+                .zip(other.generics.iter())
+                .all(|(l, r)| l.borrow().is_part_of(r.borrow().deref()))
     }
 }
 
@@ -383,9 +383,9 @@ fn create_func_from_types(
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct EnumVariant {
-    enum_name: String,
-    orig: Spanned<ast::EnumVariant>,
-    data: EnumVariantData,
+    pub enum_name: String,
+    pub orig: Spanned<ast::EnumVariant>,
+    pub data: EnumVariantData,
 }
 
 impl EnumVariant {
@@ -448,12 +448,11 @@ impl EnumVariantInstance {
     }
     pub fn is_part_of(&self, var: &Rc<EnumInstanceVariantInstance>) -> bool {
         self.variant == var.variant
-            && self.data.iter().zip(var.data.iter()).all(|(e, ty)| {
-            e.try_get_type()
-                .unwrap()
-                .borrow()
-                .is_part_of(ty.borrow().deref())
-        })
+            && self
+                .data
+                .iter()
+                .zip(var.data.iter())
+                .all(|(e, ty)| e.ty.borrow().is_part_of(ty.borrow().deref()))
     }
 }
 
@@ -468,7 +467,7 @@ impl Display for EnumVariantInstance {
                     &self
                         .data
                         .iter()
-                        .map(|o| o.try_get_type().unwrap().borrow().to_string())
+                        .map(|o| o.ty.borrow().to_string())
                         .join(", "),
                 )?;
                 f.write_str(">")?;
@@ -485,7 +484,7 @@ pub enum EnumVariantData {
 }
 
 impl EnumVariantData {
-    pub fn get_data(&self) -> impl Iterator<Item=&Rc<RefCell<Type>>> {
+    pub fn get_data(&self) -> impl Iterator<Item = &Rc<RefCell<Type>>> {
         match self {
             EnumVariantData::Unit => [].iter(),
             EnumVariantData::WithData(d) => d.iter(),
