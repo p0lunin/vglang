@@ -1,9 +1,9 @@
 use crate::common::{Context, Error, HasName};
 use crate::ir::objects::{
-    AllObject, Callable, CurriedFunction, EnumInstance, EnumVariant, FunctionObject,
+    DataVariant, FunctionObject,
 };
 use crate::ir::types::Type;
-use crate::ir::{parse_expr, type_check_expr, Expr, ExprKind, IrContext};
+use crate::ir::{parse_expr, Expr, ExprKind};
 use crate::peg_error_to_showed;
 use crate::syntax::parse_token;
 use itertools::Itertools;
@@ -222,7 +222,7 @@ impl<'a> Interpreter<'a> {
 pub enum ByteCode {
     Object(AllObject),
     Var(String, Box<ByteCode>),
-    EnumVariant(Rc<EnumVariant>, Vec<ByteCode>),
+    EnumVariant(Rc<DataVariant>, Vec<ByteCode>),
     Int(i128),
 }
 

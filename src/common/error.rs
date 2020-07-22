@@ -41,6 +41,9 @@ impl Error {
 }
 
 impl Error {
+    pub fn cannot_infer_type(span: Span) -> Self {
+        Error::Custom(span, format!("Cannot infer type!"), "-here".to_string())
+    }
     pub fn display(&self, source: &str) -> String {
         match self {
             Error::Span(span) => ErrorMsgBuilder::default_one_span(

@@ -1,21 +1,21 @@
-use crate::common::{Context, Error, Span, Spanned};
-use crate::ir::objects::{AllObject, TypeObject, Var};
-use crate::ir::types::{Type, TypeKind};
-use crate::ir::IrContext;
+use crate::common::{Context, Error, Span};
+use crate::ir::objects::{Object, Var};
+use crate::ir::types::base_types::Function;
+use crate::ir::types::{Type, TypeOperable};
 use crate::syntax::ast::{Ast, Token};
-use std::cell::RefCell;
+use std::collections::HashMap;
 use std::ops::Deref;
 use std::rc::Rc;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Expr {
-    pub ty: Rc<RefCell<Type>>,
-    span: Span,
+    pub ty: Rc<Type>,
+    pub span: Span,
     pub kind: ExprKind,
 }
 
 impl Expr {
-    pub fn new(ty: Rc<RefCell<Type>>, span: Span, kind: ExprKind) -> Self {
+    pub fn new(ty: Rc<Type>, span: Span, kind: ExprKind) -> Self {
         Expr { ty, span, kind }
     }
 }
@@ -37,7 +37,9 @@ pub enum ExprKind {
     Le(Box<Expr>, Box<Expr>),
     LeOrEq(Box<Expr>, Box<Expr>),
     Neg(Box<Expr>),
-    Object(AllObject),
+    Type(Rc<Type>),
+    Ident(String),
+    Application(Box<Expr>, Box<Expr>),
     Let {
         var: Rc<Var>,
         assign: Box<Expr>,
@@ -50,264 +52,509 @@ pub enum ExprKind {
     },
 }
 
-macro_rules! impl_op {
-    ($self:tt, $other:tt, $op:tt, $variant:tt) => {{
-        let new_span = $self.span().extend(&$other.span);
-        match (&$self.kind, &$other.kind) {
-            (ExprKind::Int(i), ExprKind::Int(n)) => {
-                let new_val = *i $op *n;
-                return Expr {
-                    ty: Type::int_val(new_val, new_span),
-                    span: new_span,
-                    kind: ExprKind::Int(new_val)
-                }
-            },
-            _ => {
-                let new_type = $self.ty.borrow().pow($other.ty.borrow().deref())
-                    .map(|ty| Rc::new(RefCell::new(ty)))
-                    .unwrap_or_else(|_| Type::unknown(new_span));
-                Expr::new(
-                    new_type,
-                    new_span,
-                    ExprKind::$variant(Box::new($self), Box::new($other))
-                )
-            }
+impl Expr {
+    pub fn convert_to_type(self) -> Result<Rc<Type>, Error> {
+        match self.kind {
+            ExprKind::Type(t) => Ok(t),
+            ExprKind::Int(_) => Ok(Rc::new(Type::Expr(self))),
+            ExprKind::Add(_, _) => Ok(Rc::new(Type::Expr(self))),
+            ExprKind::Sub(_, _) => Ok(Rc::new(Type::Expr(self))),
+            ExprKind::Mul(_, _) => Ok(Rc::new(Type::Expr(self))),
+            ExprKind::Div(_, _) => Ok(Rc::new(Type::Expr(self))),
+            ExprKind::Pow(_, _) => Ok(Rc::new(Type::Expr(self))),
+            ExprKind::And(_, _) => Ok(Rc::new(Type::Expr(self))),
+            ExprKind::Or(_, _) => Ok(Rc::new(Type::Expr(self))),
+            ExprKind::Gr(_, _) => Ok(Rc::new(Type::Expr(self))),
+            ExprKind::Eq(_, _) => Ok(Rc::new(Type::Expr(self))),
+            ExprKind::NotEq(_, _) => Ok(Rc::new(Type::Expr(self))),
+            ExprKind::GrOrEq(_, _) => Ok(Rc::new(Type::Expr(self))),
+            ExprKind::Le(_, _) => Ok(Rc::new(Type::Expr(self))),
+            ExprKind::LeOrEq(_, _) => Ok(Rc::new(Type::Expr(self))),
+            ExprKind::Neg(_) => Ok(Rc::new(Type::Expr(self))),
+            ExprKind::Ident(_) => Ok(Rc::new(Type::Expr(self))),
+            ExprKind::Application(_, _) => unimplemented!(),
+            ExprKind::Let {
+                var: _,
+                assign: _,
+                expr: _,
+            } => Ok(Rc::new(Type::Expr(self))),
+            ExprKind::IfThenElse {
+                condition: _,
+                then_arm: _,
+                else_arm: _,
+            } => Ok(Rc::new(Type::Expr(self))),
         }
-    }}
+    }
 }
 
+fn op_expr<F: Fn(Box<Expr>, Box<Expr>) -> ExprKind>(
+    left: Expr,
+    right: Expr,
+    func: F,
+) -> Result<Expr, String> {
+    match (left.ty.deref(), right.ty.deref()) {
+        (Type::Int, Type::Int) => Ok(Expr::new(
+            Rc::new(Type::Int),
+            left.span.extend(&right.span),
+            func(Box::new(left), Box::new(right)),
+        )),
+        _ => Err("Error".to_string()),
+    }
+}
+
+// TODO: typeclasses
 impl Expr {
-    pub fn span(&self) -> Span {
-        self.span
+    pub fn int(val: i128, span: Span) -> Self {
+        Expr::new(Rc::new(Type::Int), span, ExprKind::Int(val))
     }
-    pub fn add(self, other: Expr) -> Self {
-        impl_op!(self, other, +, Add)
+    pub fn add(self, other: Expr) -> Result<Self, Error> {
+        let span = self.span.extend(&other.span);
+        op_expr(self, other, ExprKind::Add).map_err(|s| Error::Custom(span, s, "-here".to_string()))
     }
-    pub fn mul(self, other: Expr) -> Self {
-        impl_op!(self, other, *, Mul)
+    pub fn mul(self, other: Expr) -> Result<Self, Error> {
+        let span = self.span.extend(&other.span);
+        op_expr(self, other, ExprKind::Mul).map_err(|s| Error::Custom(span, s, "-here".to_string()))
     }
-    pub fn sub(self, other: Expr) -> Self {
-        impl_op!(self, other, -, Sub)
+    pub fn sub(self, other: Expr) -> Result<Self, Error> {
+        let span = self.span.extend(&other.span);
+        op_expr(self, other, ExprKind::Sub).map_err(|s| Error::Custom(span, s, "-here".to_string()))
     }
-    pub fn div(self, other: Expr) -> Self {
-        impl_op!(self, other, /, Div)
+    pub fn div(self, other: Expr) -> Result<Self, Error> {
+        let span = self.span.extend(&other.span);
+        op_expr(self, other, ExprKind::Div).map_err(|s| Error::Custom(span, s, "-here".to_string()))
     }
-    pub fn pow(self, other: Expr) -> Self {
-        let new_span = self.span().extend(&other.span);
-        match (&self.kind, &other.kind) {
-            (ExprKind::Int(i), ExprKind::Int(n)) => {
-                let new_val = (*i as f64).powi(*n as i32) as i128;
-                return Expr {
-                    ty: Type::int_val(new_val, new_span),
-                    span: new_span,
-                    kind: ExprKind::Int(new_val),
-                };
-            }
-            _ => {
-                let new_type = self
-                    .ty
-                    .borrow()
-                    .pow(other.ty.borrow().deref())
-                    .map(|ty| Rc::new(RefCell::new(ty)))
-                    .unwrap_or_else(|_| Type::unknown(new_span));
-                Expr::new(
-                    new_type,
-                    new_span,
-                    ExprKind::Pow(Box::new(self), Box::new(other)),
-                )
-            }
+    pub fn pow(self, other: Expr) -> Result<Self, Error> {
+        let span = self.span.extend(&other.span);
+        op_expr(self, other, ExprKind::Pow).map_err(|s| Error::Custom(span, s, "-here".to_string()))
+    }
+    pub fn and(self, other: Expr) -> Result<Self, Error> {
+        logical_op(self, other, ExprKind::And)
+    }
+    pub fn or(self, other: Expr) -> Result<Self, Error> {
+        logical_op(self, other, ExprKind::Or)
+    }
+    pub fn eq(self, other: Expr) -> Result<Self, Error> {
+        logical_op(self, other, ExprKind::Eq)
+    }
+    pub fn not_eq(self, other: Expr) -> Result<Self, Error> {
+        logical_op(self, other, ExprKind::NotEq)
+    }
+    pub fn gr(self, other: Expr) -> Result<Self, Error> {
+        logical_op(self, other, ExprKind::Gr)
+    }
+    pub fn gr_or_eq(self, other: Expr) -> Result<Self, Error> {
+        logical_op(self, other, ExprKind::GrOrEq)
+    }
+    pub fn le(self, other: Expr) -> Result<Self, Error> {
+        logical_op(self, other, ExprKind::Le)
+    }
+    pub fn le_or_eq(self, other: Expr) -> Result<Self, Error> {
+        logical_op(self, other, ExprKind::LeOrEq)
+    }
+}
+
+fn logical_op<F>(left: Expr, right: Expr, f: F) -> Result<Expr, Error>
+where
+    F: Fn(Box<Expr>, Box<Expr>) -> ExprKind,
+{
+    dbg!(&left);
+    match left.ty.deref() {
+        Type::Type => Ok(Expr::new(
+            Type::typ(),
+            left.span.extend(&right.span),
+            f(Box::new(left), Box::new(right)),
+        )),
+        _ => unimplemented!(),
+    }
+}
+
+fn parse_binary_op<F>(
+    l: &Token,
+    r: &Token,
+    span: Span,
+    ctx: &Context<'_, Object>,
+    g: &mut HashMap<String, Option<Rc<Type>>>,
+    expected: Option<Rc<Type>>,
+    f: F,
+) -> Result<Option<Expr>, Error>
+where
+    F: Fn(Expr, Expr) -> Result<Expr, Error>,
+{
+    let left = parse_expr(l, ctx, g, None)?;
+    let right = parse_expr(r, ctx, g, None)?;
+    match (left, right) {
+        (Some(l), Some(r)) => f(l, r).map(Some),
+        (Some(l), None) => unimplemented!(),
+        (None, Some(r)) => unimplemented!(),
+        (None, None) => {
+            let left = parse_expr(l, ctx, g, expected.clone())?
+                .ok_or_else(|| Error::cannot_infer_type(span))?;
+            let right = parse_expr(r, ctx, g, expected.clone())?
+                .ok_or_else(|| Error::cannot_infer_type(span))?;
+            f(left, right).map(Some)
         }
     }
-    pub fn and(self, other: Expr) -> Self {
-        unimplemented!()
+}
+
+fn assert_types_equal(this: &Type, expected: Option<Rc<Type>>, span: Span) -> Result<(), Error> {
+    match expected {
+        Some(t) => match this.is_part_of(&t) {
+            true => Ok(()),
+            false => Err(Error::Custom(
+                span,
+                format!("Expected {}, found {} type", t, this),
+                "-here".to_owned(),
+            )),
+        },
+        None => Ok(()),
     }
-    pub fn or(self, other: Expr) -> Self {
-        unimplemented!()
-    }
-    pub fn eq(self, other: Expr, bool_type: Rc<RefCell<Type>>) -> Self {
-        Expr::new(bool_type, self.span.extend(&other.span), ExprKind::Eq(Box::new(self), Box::new(other)))
-    }
-    pub fn not_eq(self, other: Expr, bool_type: Rc<RefCell<Type>>) -> Self {
-        Expr::new(bool_type, self.span.extend(&other.span), ExprKind::NotEq(Box::new(self), Box::new(other)))
-    }
-    pub fn gr(self, other: Expr, bool_type: Rc<RefCell<Type>>) -> Self {
-        Expr::new(bool_type, self.span.extend(&other.span), ExprKind::Gr(Box::new(self), Box::new(other)))
-    }
-    pub fn gr_or_eq(self, other: Expr, bool_type: Rc<RefCell<Type>>) -> Self {
-        Expr::new(bool_type, self.span.extend(&other.span), ExprKind::GrOrEq(Box::new(self), Box::new(other)))
-    }
-    pub fn le(self, other: Expr, bool_type: Rc<RefCell<Type>>) -> Self {
-        Expr::new(bool_type, self.span.extend(&other.span), ExprKind::Le(Box::new(self), Box::new(other)))
-    }
-    pub fn le_or_eq(self, other: Expr, bool_type: Rc<RefCell<Type>>) -> Self {
-        Expr::new(bool_type, self.span.extend(&other.span), ExprKind::LeOrEq(Box::new(self), Box::new(other)))
-    }
-    pub fn neg(self) -> Self {
-        unimplemented!()
-    }
-    pub fn call(self) -> Result<Self, Error> {
-        let span = self.span;
-        match self.kind {
-            ExprKind::Object(o) => {
-                let new_o = o.call()?;
-                Ok(Expr::new(
-                    new_o.get_type().clone(),
-                    span,
-                    ExprKind::Object(new_o),
-                ))
-            }
-            _ => Ok(self),
-        }
-    }
+}
+
+fn check_type(e: Expr, expected: Option<Rc<Type>>) -> Result<Option<Expr>, Error> {
+    assert_types_equal(&e.ty, expected, e.span)?;
+    Ok(Some(e))
+}
+
+pub fn parse_type(token: &Token, ctx: &Context<'_, Object>) -> Result<Rc<Type>, Error> {
+    parse_expr(token, ctx, &mut HashMap::new(), Some(Type::typ()))
+        .and_then(|e| e.ok_or_else(|| Error::cannot_infer_type(token.span)))
+        .and_then(|e| e.convert_to_type())
 }
 
 pub fn parse_expr(
-    token: Token,
-    ctx: &Context<'_, AllObject>,
-    ir_ctx: &mut IrContext,
-) -> Result<Expr, Error> {
-    let bool_type = ctx.find("Bool").unwrap().get_type();
-    match token.ast {
-        Ast::Int(i) => Ok(Expr::new(
-            Type::int_val(i, token.span),
-            token.span,
-            ExprKind::Int(i),
-        )),
-        Ast::Add(l, r) => Ok(parse_expr(*l, ctx, ir_ctx)?.add(parse_expr(*r, ctx, ir_ctx)?)),
-        Ast::Sub(l, r) => Ok(parse_expr(*l, ctx, ir_ctx)?.sub(parse_expr(*r, ctx, ir_ctx)?)),
-        Ast::Ident(i) => match i.as_ref() {
-            "Int" => Ok(Expr::new(
-                Type::type_type(),
+    token: &Token,
+    ctx: &Context<'_, Object>,
+    g: &mut HashMap<String, Option<Rc<Type>>>,
+    expected: Option<Rc<Type>>,
+) -> Result<Option<Expr>, Error> {
+    match &token.ast {
+        Ast::Int(i) => check_type(Expr::int(*i, token.span), expected),
+        Ast::Add(l, r) => {
+            match parse_binary_op(
+                l.as_ref(),
+                r.as_ref(),
                 token.span,
-                ExprKind::Object(AllObject::Type(Rc::new(TypeObject {
-                    name: Spanned::new("".to_owned(), token.span),
-                    ttype: Rc::new(RefCell::new(Type::Int(TypeKind::empty(token.span)))),
-                }))),
-            )),
-            "Type" => Ok(Expr::new(
-                Type::type_type(),
+                ctx,
+                g,
+                expected.clone(),
+                Expr::add,
+            )? {
+                Some(e) => check_type(e, expected),
+                None => Ok(None),
+            }
+        }
+        Ast::Sub(l, r) => {
+            match parse_binary_op(
+                l.as_ref(),
+                r.as_ref(),
                 token.span,
-                ExprKind::Object(AllObject::Type(Rc::new(TypeObject {
-                    name: Spanned::new("".to_owned(), token.span),
-                    ttype: Type::type_type(),
-                }))),
-            )),
-            name => match ctx.find(name) {
-                Some(o) => {
-                    let o_cloned = o.clone();
-                    Ok(Expr::new(
-                        o_cloned.get_type(),
-                        token.span,
-                        ExprKind::Object(o_cloned),
-                    ))
-                }
-                _ => Err(Error::Custom(
+                ctx,
+                g,
+                expected.clone(),
+                Expr::sub,
+            )? {
+                Some(e) => check_type(e, expected),
+                None => Ok(None),
+            }
+        }
+        Ast::Mul(l, r) => {
+            match parse_binary_op(
+                l.as_ref(),
+                r.as_ref(),
+                token.span,
+                ctx,
+                g,
+                expected.clone(),
+                Expr::mul,
+            )? {
+                Some(e) => check_type(e, expected),
+                None => Ok(None),
+            }
+        }
+        Ast::Div(l, r) => {
+            match parse_binary_op(
+                l.as_ref(),
+                r.as_ref(),
+                token.span,
+                ctx,
+                g,
+                expected.clone(),
+                Expr::div,
+            )? {
+                Some(e) => check_type(e, expected),
+                None => Ok(None),
+            }
+        }
+        Ast::Pow(l, r) => {
+            match parse_binary_op(
+                l.as_ref(),
+                r.as_ref(),
+                token.span,
+                ctx,
+                g,
+                expected.clone(),
+                Expr::pow,
+            )? {
+                Some(e) => check_type(e, expected),
+                None => Ok(None),
+            }
+        }
+        Ast::And(l, r) => {
+            match parse_binary_op(
+                l.as_ref(),
+                r.as_ref(),
+                token.span,
+                ctx,
+                g,
+                expected.clone(),
+                Expr::and,
+            )? {
+                Some(e) => check_type(e, expected),
+                None => Ok(None),
+            }
+        }
+        Ast::Or(l, r) => {
+            match parse_binary_op(
+                l.as_ref(),
+                r.as_ref(),
+                token.span,
+                ctx,
+                g,
+                expected.clone(),
+                Expr::or,
+            )? {
+                Some(e) => check_type(e, expected),
+                None => Ok(None),
+            }
+        }
+        Ast::Gr(l, r) => {
+            match parse_binary_op(
+                l.as_ref(),
+                r.as_ref(),
+                token.span,
+                ctx,
+                g,
+                expected.clone(),
+                Expr::gr,
+            )? {
+                Some(e) => check_type(e, expected),
+                None => Ok(None),
+            }
+        }
+        Ast::Le(l, r) => {
+            match parse_binary_op(
+                l.as_ref(),
+                r.as_ref(),
+                token.span,
+                ctx,
+                g,
+                expected.clone(),
+                Expr::le,
+            )? {
+                Some(e) => check_type(e, expected),
+                None => Ok(None),
+            }
+        }
+        Ast::GrEq(l, r) => {
+            match parse_binary_op(
+                l.as_ref(),
+                r.as_ref(),
+                token.span,
+                ctx,
+                g,
+                expected.clone(),
+                Expr::gr_or_eq,
+            )? {
+                Some(e) => check_type(e, expected),
+                None => Ok(None),
+            }
+        }
+        Ast::LeEq(l, r) => {
+            match parse_binary_op(
+                l.as_ref(),
+                r.as_ref(),
+                token.span,
+                ctx,
+                g,
+                expected.clone(),
+                Expr::le_or_eq,
+            )? {
+                Some(e) => check_type(e, expected),
+                None => Ok(None),
+            }
+        }
+        Ast::Eq(_, _) => unimplemented!(),
+        Ast::NotEq(_, _) => unimplemented!(),
+        Ast::Neg(t) => {
+            let expr = parse_expr(t, ctx, &mut HashMap::new(), Some(Rc::new(Type::Int)))?; // TODO
+            match expr {
+                Some(e) => Ok(Some(Expr::new(
+                    e.ty.clone(),
                     token.span,
-                    format!("{} not found", i),
-                    "-here".to_owned(),
-                )),
-            },
-        },
-        Ast::CallFunction(func, arg) => {
-            let left_expr = parse_expr(*func, ctx, ir_ctx)?;
-            let arg_expr = parse_expr(*arg, ctx, ir_ctx)?;
-            match &left_expr.kind {
-                ExprKind::Object(o) => {
-                    let new_o = o.call_with_arg_expr(arg_expr, ir_ctx, token.span)?;
-                    Ok(Expr::new(
-                        new_o.get_type(),
-                        token.span,
-                        ExprKind::Object(new_o),
-                    ))
-                }
-                _ => Err(Error::Span(token.span)),
+                    ExprKind::Neg(Box::new(e)),
+                ))),
+                None => unimplemented!(),
             }
         }
-        Ast::Dot(l, r) => {
-            let left_expr = parse_expr(*l, ctx, ir_ctx)?;
-            let right_expr = match r.ast {
-                Ast::Ident(i) => i,
-                _ => return Err(Error::Span(r.span)),
-            };
-            let span = token.span;
-            match left_expr.kind {
-                ExprKind::Object(o) => o
-                    .try_get_member(right_expr.as_str(), span)
-                    .map(|o| Expr::new(o.get_type(), span, ExprKind::Object(o))),
-                _ => Err(Error::Span(span)),
-            }
-        }
-        Ast::Parenthesis(p) => parse_expr(*p, ctx, ir_ctx),
-        Ast::Mul(l, r) => Ok(parse_expr(*l, ctx, ir_ctx)?.mul(parse_expr(*r, ctx, ir_ctx)?)),
-        Ast::Div(l, r) => Ok(parse_expr(*l, ctx, ir_ctx)?.div(parse_expr(*r, ctx, ir_ctx)?)),
-        Ast::Pow(l, r) => Ok(parse_expr(*l, ctx, ir_ctx)?.pow(parse_expr(*r, ctx, ir_ctx)?)),
-        Ast::And(l, r) => Ok(parse_expr(*l, ctx, ir_ctx)?.and(parse_expr(*r, ctx, ir_ctx)?)),
-        Ast::Or(l, r) => Ok(parse_expr(*l, ctx, ir_ctx)?.or(parse_expr(*r, ctx, ir_ctx)?)),
-        Ast::Gr(l, r) => Ok(parse_expr(*l, ctx, ir_ctx)?.gr(parse_expr(*r, ctx, ir_ctx)?, bool_type)),
-        Ast::Le(l, r) => Ok(parse_expr(*l, ctx, ir_ctx)?.le(parse_expr(*r, ctx, ir_ctx)?, bool_type)),
-        Ast::GrEq(l, r) => Ok(parse_expr(*l, ctx, ir_ctx)?.gr_or_eq(parse_expr(*r, ctx, ir_ctx)?, bool_type)),
-        Ast::LeEq(l, r) => Ok(parse_expr(*l, ctx, ir_ctx)?.le_or_eq(parse_expr(*r, ctx, ir_ctx)?, bool_type)),
-        Ast::Eq(l, r) => Ok(parse_expr(*l, ctx, ir_ctx)?.eq(parse_expr(*r, ctx, ir_ctx)?, bool_type)),
-        Ast::NotEq(l, r) => Ok(parse_expr(*l, ctx, ir_ctx)?.not_eq(parse_expr(*r, ctx, ir_ctx)?, bool_type)),
-        Ast::Neg(t) => Ok(parse_expr(*t, ctx, ir_ctx)?.neg()),
+        Ast::Parenthesis(t) => parse_expr(token, ctx, g, expected),
         Ast::Double(_) => unimplemented!(),
-        Ast::Val => Err(Error::Span(token.span)),
-        Ast::Slice(_) => unimplemented!(),
-        Ast::Implication(_, _) => Err(Error::Span(token.span)),
-        Ast::Named(_, _) => Err(Error::Span(token.span)),
-        Ast::Let { var, assign, expr } => {
-            let assign = parse_expr(*assign, ctx, ir_ctx)?;
-            let var = Rc::new(Var {
-                name: var,
-                ty: assign.ty.clone(),
-            });
-            let ctx = Context {
-                objects: vec![AllObject::Var(var.clone())],
-                parent: Some(ctx),
-            };
-            let expr = Box::new(parse_expr(*expr, &ctx, ir_ctx)?);
-            Ok(Expr::new(
-                expr.ty.clone(),
-                token.span,
-                ExprKind::Let {
-                    var,
-                    assign: Box::new(assign),
-                    expr,
+        Ast::Ident(i) => {
+            let expr = match i.as_str() {
+                "Int" => Expr::new(
+                    Rc::new(Type::Type),
+                    token.span,
+                    ExprKind::Type(Rc::new(Type::Int)),
+                ),
+                "Type" => Expr::new(
+                    Rc::new(Type::Type),
+                    token.span,
+                    ExprKind::Type(Rc::new(Type::Type)),
+                ),
+                _ => match g.get(i) {
+                    Some(Some(t)) => Expr::new(t.clone(), token.span, ExprKind::Ident(i.clone())),
+                    Some(None) => unreachable!(),
+                    None => match ctx.find(i.as_str()) {
+                        Some(o) => Expr::new(o.get_type(), token.span, ExprKind::Ident(i.clone())),
+                        None => {
+                            return Err(Error::Custom(
+                                token.span,
+                                format!("Cannot find {} in scope", i),
+                                "-this".to_string(),
+                            ))
+                        }
+                    },
                 },
-            ))
+            };
+            check_type(expr, expected)
         }
-        Ast::IfThenElse { if_, then, else_ } => {
-            let cond = parse_expr(*if_, ctx, ir_ctx)?;
-            let bool_type = ctx.find("Bool").unwrap();
-            let ty = cond.ty.borrow();
-            match ty.is_part_of(bool_type.get_type().borrow().deref()) {
-                true => {
-                    let then_arm = parse_expr(*then, ctx, ir_ctx)?;
-                    let else_arm = parse_expr(*else_, ctx, ir_ctx)?;
-                    drop(ty);
-                    let if_ty = Rc::new(RefCell::new(
-                        then_arm
-                            .ty
-                            .borrow()
-                            .or(else_arm.ty.borrow().deref())
-                            .map_err(|e| Error::Custom(cond.span, e, "-here".to_string()))?,
-                    ));
-                    Ok(Expr::new(
-                        if_ty,
-                        token.span,
-                        ExprKind::IfThenElse {
-                            condition: Box::new(cond),
-                            then_arm: Box::new(then_arm),
-                            else_arm: Box::new(else_arm),
+        Ast::Val => check_type(
+            Expr::new(Type::typ(), token.span, ExprKind::Type(Type::unknown())),
+            expected,
+        ),
+        Ast::Slice(_) => unimplemented!(),
+        Ast::Implication(l, r) => {
+            let exp = Some(Type::typ());
+            let left = parse_expr(l, ctx, g, exp.clone())?
+                .ok_or_else(|| Error::cannot_infer_type(token.span))?;
+            let right = parse_expr(r, ctx, g, exp.clone())?
+                .ok_or_else(|| Error::cannot_infer_type(token.span))?;
+            let expr = Expr::new(
+                Type::typ(),
+                token.span,
+                ExprKind::Type(Rc::new(Type::Function(Function {
+                    get_value: left.convert_to_type()?,
+                    return_value: right.convert_to_type()?,
+                }))),
+            );
+            check_type(expr, expected)
+        }
+        Ast::Named(_, _) => unimplemented!(),
+        Ast::CallFunction(left, right) => {
+            let right = parse_expr(right.as_ref(), ctx, g, None)?;
+            match right {
+                Some(right) => {
+                    let left = parse_expr(
+                        left,
+                        ctx,
+                        g,
+                        Some(Rc::new(Type::Function(Function {
+                            get_value: right.ty.clone(),
+                            return_value: expected.clone().unwrap_or_else(|| Rc::new(Type::Never)),
+                        }))),
+                    )?;
+                    match left {
+                        Some(e) => match e.ty.deref() {
+                            Type::Function(f) => {
+                                let e = Expr::new(
+                                    f.return_value.clone(),
+                                    token.span,
+                                    ExprKind::Application(Box::new(e), Box::new(right)),
+                                );
+                                check_type(e, expected)
+                            }
+                            t => Err(Error::Custom(
+                                e.span,
+                                format!("Expected function, found {}", t),
+                                "-here".to_owned(),
+                            )),
                         },
-                    ))
+                        None => Err(Error::cannot_infer_type(token.span)),
+                    }
                 }
-                false => Err(Error::Custom(
-                    cond.span,
-                    "Condition must be Bool type".to_string(),
-                    format!("Expected Bool, found {} type", cond.ty.borrow()),
-                )),
+                None => unimplemented!(),
             }
         }
+        Ast::Dot(_, _) => unimplemented!(),
+        Ast::Let { var, assign, expr } => {
+            let ex = parse_expr(assign.as_ref(), ctx, g, None)?;
+            match ex {
+                Some(assigned) => {
+                    let var = Rc::new(Var {
+                        name: (**var).clone(),
+                        ty: assigned.ty.clone(),
+                    });
+                    let ctx = Context {
+                        objects: vec![Object::Var(var.clone())],
+                        parent: Some(ctx),
+                    };
+                    let expr_ = parse_expr(expr.as_ref(), &ctx, g, expected.clone())?;
+                    match expr_ {
+                        Some(e) => {
+                            let expr = Expr::new(
+                                e.ty.clone(),
+                                token.span,
+                                ExprKind::Let {
+                                    var,
+                                    assign: Box::new(assigned),
+                                    expr: Box::new(e),
+                                },
+                            );
+                            check_type(expr, expected)
+                        }
+                        None => Err(Error::cannot_infer_type(expr.span)),
+                    }
+                }
+                None => match g.get(var.as_str()) {
+                    Some(Some(_)) | None => {
+                        g.insert(var.to_string(), None);
+                        let expr_ = match parse_expr(expr.as_ref(), &ctx, g, expected.clone())? {
+                            Some(e) => e,
+                            None => Err(Error::cannot_infer_type(expr.span))?,
+                        };
+                        match g.get(var.as_str()) {
+                            Some(Some(inferred)) => {
+                                let var = Rc::new(Var {
+                                    name: (**var).clone(),
+                                    ty: inferred.clone(),
+                                });
+                                match parse_expr(assign.as_ref(), ctx, g, Some(inferred.clone()))? {
+                                    Some(assigned) => {
+                                        let expr = Expr::new(
+                                            expr_.ty.clone(),
+                                            token.span,
+                                            ExprKind::Let {
+                                                var,
+                                                assign: Box::new(assigned),
+                                                expr: Box::new(expr_),
+                                            },
+                                        );
+                                        check_type(expr, expected)
+                                    }
+                                    None => Err(Error::cannot_infer_type(assign.span)),
+                                }
+                            }
+                            Some(None) => Err(Error::cannot_infer_type(assign.span)),
+                            None => unreachable!(),
+                        }
+                    }
+                    Some(None) => Err(Error::cannot_infer_type(var.span)),
+                },
+            }
+        }
+        Ast::IfThenElse {
+            if_: _,
+            then: _,
+            else_: _,
+        } => unimplemented!(),
     }
 }

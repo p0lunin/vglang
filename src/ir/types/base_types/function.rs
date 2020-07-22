@@ -1,38 +1,31 @@
-use crate::ir::types::{OneTypeKind, Type, TypeOperable};
-use std::cell::RefCell;
+use crate::ir::types::Type;
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
 use std::rc::Rc;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Function {
-    pub get_value: Rc<RefCell<Type>>,
-    pub return_value: Rc<RefCell<Type>>,
+    pub get_value: Rc<Type>,
+    pub return_value: Rc<Type>,
 }
 
 impl Function {
     pub fn is_part_of(&self, other: &Function) -> bool {
-        other
-            .get_value
-            .borrow()
-            .is_part_of(self.get_value.borrow().deref())
-            && self
-                .return_value
-                .borrow()
-                .is_part_of(&other.return_value.borrow().deref())
+        other.get_value.is_part_of(self.get_value.deref())
+            && self.return_value.is_part_of(&other.return_value.deref())
     }
 }
 
 impl Display for Function {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        self.get_value.borrow().fmt(f)?;
+        self.get_value.fmt(f)?;
         f.write_str(" -> ")?;
-        self.return_value.borrow().fmt(f)?;
+        self.return_value.fmt(f)?;
         Ok(())
     }
 }
-
-impl TypeOperable<Function> for OneTypeKind<Function> {
+/*
+impl TypeOperable for Function {
     fn add(self, _: Type) -> Result<Self, String> {
         Err("+ is not allowed for `Function` value".to_owned())
     }
@@ -65,3 +58,4 @@ impl TypeOperable<Function> for OneTypeKind<Function> {
         Err("^ is not allowed for `Function` value".to_owned())
     }
 }
+*/

@@ -1,10 +1,21 @@
 use clap::{App, Arg};
 use fsmcreator::compile_file;
-use fsmcreator::interpreter::Interpreter;
 use std::io;
 use std::io::{stdin, Write};
+/*use z3::ast::Ast;
+
+fn some() {
+    let config = z3::Config::new();
+    let ctx = z3::Context::new(&config);
+    let solver = z3::Solver::new(&ctx);
+    solver.push();
+    solver.assert(&z3::ast::Int::from_u64(&ctx, 12).gt(&z3::ast::Int::from_u64(&ctx, 11)));
+    let res = solver.check();
+    println!("{:?}", res)
+}*/
 
 fn main() {
+    //some();
     let app = App::new("Tekstkvest")
         .version("Какая блять версия")
         .author("Anonymous student from college Server")
@@ -31,38 +42,37 @@ fn main() {
             return;
         }
     };
-    let path_to_std = match matches.value_of("std") {
-        Some(s) => s,
-        None => {
-            println!("Write path to std");
-            return;
-        }
+    let path_to_std = matches.value_of("std");
+    let ctx = {
+        path_to_std.and_then(|path_to_std| {
+            let (ctx, impls1) = match compile_file(path_to_std, None) {
+                Ok(ctx) => ctx,
+                Err(e) => {
+                    println!("{}", e);
+                    return None;
+                }
+            };
+            Some(ctx)
+        })
     };
-    let (ctx, ir_ctx1) = match compile_file(path_to_std, None) {
+    let (ctx, impls2) = match compile_file(path_to_file, ctx.as_ref()) {
         Ok(ctx) => ctx,
         Err(e) => {
             println!("{}", e);
             return;
         }
     };
-    let (ctx, ir_ctx) = match compile_file(path_to_file, Some(&ctx)) {
-        Ok(ctx) => ctx,
-        Err(e) => {
-            println!("{}", e);
-            return;
-        }
-    };
-    println!("Types: ");
+    println!("Objects: ");
     ctx.objects.iter().for_each(|o| {
         println!("{}\n", o);
     });
-
+    /*
     let mut interpreter = Interpreter::from_ir_context(ctx, ir_ctx);
 
     repl(">>", |d| match interpreter.execute_code(&d) {
         Ok(b) => b.to_string(),
         Err(e) => e,
-    })
+    })*/
 }
 
 fn repl(s: &str, mut f: impl FnMut(String) -> String) {

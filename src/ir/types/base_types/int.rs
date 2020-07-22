@@ -1,54 +1,44 @@
-use crate::common::{AddSpan, Spanned, VecType};
-use crate::ir::types::{Type, TypeKind, TypeOperable};
+use crate::ir::types::{Type, TypeOperable};
 use itertools::Itertools;
-use std::cell::RefCell;
-use std::cmp::{max, min};
 use std::fmt::{Display, Formatter};
+use std::ops::{Add, Div, Sub};
 use std::rc::Rc;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Int {
+    Infinite,
     Value(i128),
-    Bound(OneRangeIntBound),
-    KnownBound { low: i128, high: i128 },
+    LowBound(i128),
+    HighBound(i128),
     Slice(Slice),
+    Or(Box<Int>, Box<Int>),
+    And(Box<Int>, Box<Int>),
 }
 
-impl Spanned<i128> {
-    pub fn get_type(&self) -> Rc<RefCell<Type>> {
-        Rc::new(RefCell::new(Type::Int(TypeKind::from_kinds(Spanned::new(
-            VecType::one(Int::Value(self.val)),
-            self.span,
-        )))))
-    }
+pub fn get_type_i128(this: i128) -> Rc<Type> {
+    Rc::new(Type::Int(Int::Value(this)))
 }
 
 impl Int {
     pub fn is_part_of(&self, other: &Self) -> bool {
         match (self, other) {
-            (Int::Slice(l), r) => match r {
+            (_, Int::Infinite) => true,
+            (Int::Value(i1), Int::Value(i2)) => i1 == i2,
+            (Int::Value(i), Int::LowBound(l)) => i >= l,
+            (Int::Value(i), Int::HighBound(h)) => i <= h,
+            (r, Int::Slice(l)) => match r {
                 Int::Value(v) => (*v - l.to) % l.step == 0,
                 Int::Slice(r) => l.from >= r.from && l.to <= r.to && r.step % l.step == 0,
                 _ => false,
             },
-            (_, Int::Slice(_)) => unimplemented!(),
-            _ => {
-                let (minx, maxx) = self.min_and_max();
-                let (miny, maxy) = other.min_and_max();
-                minx >= miny && maxx <= maxy
-            }
-        }
-    }
-    pub fn min_and_max(&self) -> (i128, i128) {
-        match self {
-            Int::Value(v) => (*v, *v),
-            Int::Bound(b) => match b {
-                OneRangeIntBound::High(h) => (i128::min_value(), *h),
-                OneRangeIntBound::Low(l) => (*l, i128::max_value()),
-                _ => (i128::min_value(), i128::max_value()),
-            },
-            Int::KnownBound { low, high } => (*low, *high),
-            Int::Slice(s) => (s.from, s.to),
+            (Int::Slice(_), _) => unimplemented!(),
+            (Int::LowBound(l), Int::LowBound(r)) => l >= r,
+            (Int::HighBound(l), Int::HighBound(r)) => l <= r,
+            (Int::Or(i1, i2), r) => i1.is_part_of(r) && i2.is_part_of(r),
+            (i, Int::Or(l, r)) => i.is_part_of(l) || i.is_part_of(r),
+            (Int::And(i1, i2), r) => i1.is_part_of(r) && i2.is_part_of(r),
+            (i, Int::And(l, r)) => i.is_part_of(l) && i.is_part_of(r),
+            _ => false,
         }
     }
 }
@@ -57,319 +47,138 @@ impl Display for Int {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         match self {
             Int::Value(i) => i.fmt(f),
-            Int::Bound(i) => i.fmt(f),
-            Int::KnownBound { low, high } => {
-                f.write_str(&format!("(val>={} & val<={})", low, high))
-            }
-            Int::Slice(s) => f.write_str(&format!(
+            Int::Slice(s) => write!(
+                f,
                 "val={{from: {}; step: {}; to: {};}}",
                 s.from, s.step, s.to
-            )),
+            ),
+            Int::Or(l, r) => write!(f, "({}) | ({})", l, r),
+            Int::Infinite => f.write_str("Int"),
+            Int::LowBound(l) => write!(f, ">={}", l),
+            Int::HighBound(h) => write!(f, "<={}", h),
+            Int::And(l, r) => write!(f, "{} & {}", l, r),
         }
     }
 }
 
-impl TypeOperable<Int> for TypeKind<Int> {
-    fn add(self, right: Type) -> Result<Self, String> {
-        let TypeKind { name, kinds } = self;
-        let Spanned { val, span } = kinds;
-        let kinds = val
-            .inner()
-            .into_iter()
-            .map(|t| t.add(right.clone()))
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .flatten()
-            .collect::<VecType<_>>()
-            .add_span(span);
-        Ok(TypeKind { name, kinds })
-    }
-
-    fn neg(self) -> Result<Self, String> {
-        let TypeKind { name, kinds } = self;
-        let Spanned { val, span } = kinds;
-        let kinds = val
-            .inner()
-            .into_iter()
-            .map(|t| t.neg())
-            .collect::<Result<VecType<_>, _>>()?
-            .add_span(span);
-        Ok(TypeKind { name, kinds })
-    }
-
-    fn and(self, right: Type) -> Result<Self, String> {
-        let ty = match right {
-            Type::Int(i) => i,
-            _ => {
-                return Err(format!(
-                    "Operator & not implement for types {} and {}",
-                    self, right
-                ))
-            }
-        };
-        let TypeKind { name, kinds } = self;
-        let Spanned { val, span } = kinds;
-        let kinds = val
-            .into_iter()
-            .cartesian_product(ty.kinds.inner().into_iter())
-            .map(|(t, i)| t.extend_with_other(i.clone()))
-            .collect::<Result<Vec<_>, String>>()?
-            .into_iter()
-            .flatten()
-            .collect::<VecType<_>>()
-            .add_span(span);
-        Ok(TypeKind { name, kinds })
-    }
-
-    fn or(self, right: Type) -> Result<Self, String> {
-        let TypeKind { name, kinds } = self;
-        let new_span = kinds.span.extend(&right.span());
+impl TypeOperable for Int {
+    fn add(&self, right: &Type) -> Result<Self, String> {
         match right {
-            Type::Int(i) => Ok(TypeKind {
-                name,
-                kinds: kinds.inner().with(i.kinds.inner()).add_span(new_span),
-            }),
-            _ => Err(format!(
-                "Operator | not implement for types {} and {}",
-                TypeKind { name, kinds },
-                right
-            )),
+            Type::Int(i) => self.add_int(&i),
+            _ => Err(format!("Cannot add {} to {}", self, right)),
         }
     }
 
-    fn mul(self, right: Type) -> Result<Self, String> {
-        let TypeKind { name, kinds } = self;
-        let Spanned { val, span } = kinds;
-        let kinds = val
-            .inner()
-            .into_iter()
-            .map(|t| t.mul(right.clone()))
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .flatten()
-            .collect::<VecType<_>>()
-            .add_span(span);
-        Ok(TypeKind { name, kinds })
+    fn neg(&self) -> Result<Self, String> {
+        self.neg_int()
     }
 
-    fn sub(self, right: Type) -> Result<Self, String> {
-        let TypeKind { name, kinds } = self;
-        let Spanned { val, span } = kinds;
-        let kinds = val
-            .inner()
-            .into_iter()
-            .map(|t| t.sub(right.clone()))
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .flatten()
-            .collect::<VecType<_>>()
-            .add_span(span);
-        Ok(TypeKind { name, kinds })
+    fn and(&self, right: &Type) -> Result<Self, String> {
+        match right {
+            Type::Int(i) => Ok(Int::And(Box::new(self.clone()), Box::new(i.clone()))),
+            _ => Err(format!("Cannot and {} to {}", self, right)),
+        }
     }
 
-    fn div(self, right: Type) -> Result<Self, String> {
-        let TypeKind { name, kinds } = self;
-        let Spanned { val, span } = kinds;
-        let kinds = val
-            .inner()
-            .into_iter()
-            .map(|t| t.div(right.clone()))
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .flatten()
-            .collect::<VecType<_>>()
-            .add_span(span);
-        Ok(TypeKind { name, kinds })
+    fn or(&self, right: &Type) -> Result<Self, String> {
+        match right {
+            Type::Int(i) => Ok(Int::Or(Box::new(self.clone()), Box::new(i.clone()))),
+            _ => Err(format!("Cannot or {} to {}", self, right)),
+        }
     }
 
-    fn pow(self, right: Type) -> Result<Self, String> {
-        let TypeKind { name, kinds } = self;
-        let Spanned { val, span } = kinds;
-        let kinds = val
-            .inner()
-            .into_iter()
-            .map(|t| t.pow(right.clone()))
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .flatten()
-            .collect::<VecType<_>>()
-            .add_span(span);
-        Ok(TypeKind { name, kinds })
+    fn mul(&self, right: &Type) -> Result<Self, String> {
+        match right {
+            Type::Int(i) => self.mul_int(&i),
+            _ => Err(format!("Cannot mul {} to {}", self, right)),
+        }
     }
-}
 
-impl Int {
-    pub(crate) fn add(self, val: Type) -> Result<VecType<Self>, String> {
-        let val = match val {
-            Type::Int(i) => i,
-            _ => return Err(format!("Cannot use + for `{}` and `{}` types", self, val)),
-        };
-        val.kinds
-            .inner()
-            .into_iter()
-            .map(|val| {
-                let val = match val {
-                    Int::Value(v) => v,
-                    _ => return Err(format!("Cannot use + for `{}` and `{}` types", self, val)),
-                };
-                Ok(match self.clone() {
-                    Int::Value(v) => Int::Value(v + val),
-                    Int::Bound(b) => Int::Bound(b.add(val)?),
-                    Int::KnownBound { low, high } => Int::KnownBound {
-                        low: low + val,
-                        high: high + val,
-                    },
-                    Int::Slice(s) => Int::Slice(Slice {
-                        from: s.from + val,
-                        step: s.step,
-                        to: s.to + val,
-                    }),
-                })
-            })
-            .collect()
+    fn sub(&self, right: &Type) -> Result<Self, String> {
+        match right {
+            Type::Int(i) => self.sub_int(&i),
+            _ => Err(format!("Cannot sub {} to {}", self, right)),
+        }
     }
-    pub(crate) fn mul(self, val: Type) -> Result<VecType<Self>, String> {
-        let val = match val {
-            Type::Int(i) => i,
-            _ => return Err(format!("Cannot use * for `{}` and `{}` types", self, val)),
-        };
-        val.kinds
-            .inner()
-            .into_iter()
-            .map(|val| {
-                let val = match val {
-                    Int::Value(v) => v,
-                    _ => return Err(format!("Cannot use * for `{}` and `{}` types", self, val)),
-                };
-                Ok(match self.clone() {
-                    Int::Value(v) => Int::Value(v * val),
-                    Int::Bound(b) => Int::Bound(b.mul(val)?),
-                    Int::KnownBound { low, high } => Int::KnownBound {
-                        low: low * val,
-                        high: high * val,
-                    },
-                    Int::Slice(s) => Int::Slice(Slice {
-                        from: s.from * val,
-                        step: s.step * val,
-                        to: s.to * val,
-                    }),
-                })
-            })
-            .collect()
+
+    fn div(&self, right: &Type) -> Result<Self, String> {
+        match right {
+            Type::Int(i) => self.div_int(&i),
+            _ => Err(format!("Cannot div {} to {}", self, right)),
+        }
     }
-    pub(crate) fn sub(self, val: Type) -> Result<VecType<Self>, String> {
-        let val = match val {
-            Type::Int(i) => i,
-            _ => return Err(format!("Cannot use - for `{}` and `{}` types", self, val)),
-        };
-        val.kinds
-            .inner()
-            .into_iter()
-            .map(|val| {
-                let val = match val {
-                    Int::Value(v) => v,
-                    _ => return Err(format!("Cannot use - for `{}` and `{}` types", self, val)),
-                };
-                Ok(match self.clone() {
-                    Int::Value(v) => Int::Value(v - val),
-                    Int::Bound(b) => Int::Bound(b.add(-val)?),
-                    Int::KnownBound { low, high } => Int::KnownBound {
-                        low: low - val,
-                        high: high - val,
-                    },
-                    Int::Slice(s) => Int::Slice(Slice {
-                        from: s.from - val,
-                        step: s.step,
-                        to: s.to - val,
-                    }),
-                })
-            })
-            .collect()
-    }
-    pub(crate) fn div(self, val: Type) -> Result<VecType<Self>, String> {
-        let val = match val {
-            Type::Int(i) => i,
-            _ => return Err(format!("Cannot use / for `{}` and `{}` types", self, val)),
-        };
-        val.kinds
-            .inner()
-            .into_iter()
-            .map(|val| {
-                let val = match val {
-                    Int::Value(v) => v,
-                    _ => return Err(format!("Cannot use / for `{}` and `{}` types", self, val)),
-                };
-                Ok(match self.clone() {
-                    Int::Value(v) => Int::Value(v + val),
-                    Int::Bound(b) => Int::Bound(b.div(val)?),
-                    Int::KnownBound { low, high } => Int::KnownBound {
-                        low: low / val,
-                        high: high / val,
-                    },
-                    Int::Slice(s) => Int::Slice(Slice {
-                        from: s.from / val,
-                        step: s.step,
-                        to: s.to / val,
-                    }),
-                })
-            })
-            .collect()
-    }
-    pub(crate) fn pow(self, val: Type) -> Result<VecType<Self>, String> {
-        let val = match val {
-            Type::Int(i) => i,
-            _ => return Err(format!("Cannot use ^ for `{}` and `{}` types", self, val)),
-        };
-        val.kinds
-            .inner()
-            .into_iter()
-            .map(|val| {
-                let val = match val {
-                    Int::Value(v) => v,
-                    _ => return Err(format!("Cannot use ^ for `{}` and `{}` types", self, val)),
-                };
-                Ok(match self.clone() {
-                    Int::Value(v) => Int::Value(v.pow(val as u32)),
-                    Int::Bound(b) => Int::Bound(b.pow(val)?),
-                    Int::KnownBound { low, high } => Int::KnownBound {
-                        low: low.pow(val as u32),
-                        high: high.pow(val as u32),
-                    },
-                    Int::Slice(s) => Int::Slice(Slice {
-                        from: s.from.pow(val as u32),
-                        step: s.step.pow(val as u32),
-                        to: s.to.pow(val as u32),
-                    }),
-                })
-            })
-            .collect()
-    }
-    pub fn neg(self) -> Result<Self, String> {
-        match self {
-            Int::Value(v) => Ok(Int::Value(-v)),
-            Int::Bound(bound) => match bound {
-                OneRangeIntBound::High(h) => Ok(Int::Bound(OneRangeIntBound::High(-h))),
-                OneRangeIntBound::Low(l) => Ok(Int::Bound(OneRangeIntBound::Low(-l))),
-                OneRangeIntBound::NotEqual(n) => Ok(Int::Bound(OneRangeIntBound::NotEqual(-n))),
-                OneRangeIntBound::None => Err(format!("Cannot apply - for `Unknown` type")),
-            },
-            Int::KnownBound { low, high } => Ok(Int::KnownBound {
-                low: -low,
-                high: -high,
-            }),
-            Int::Slice(s) => Ok(Int::Slice(Slice {
-                to: -s.to,
-                step: s.step,
-                from: -s.from,
-            })),
+
+    fn pow(&self, right: &Type) -> Result<Self, String> {
+        match right {
+            Type::Int(i) => self.pow_int(&i),
+            _ => Err(format!("Cannot pow {} to {}", self, right)),
         }
     }
 }
 
+fn int_op<FD, FS>(left: &Int, right: &Int, default: FD, for_step: FS) -> Result<Int, String>
+where
+    FD: Fn(i128, i128) -> i128 + Clone,
+    FS: Fn(i128, i128) -> i128 + Clone,
+{
+    let val = *match right {
+        Int::Value(v) => v,
+        _ => return Err(format!("Cannot use + for `{}` and `{}` types", left, right)),
+    };
+    Ok(match left {
+        Int::Value(v) => Int::Value(default(*v, val)),
+        Int::Slice(s) => Int::Slice(Slice {
+            from: default(s.from, val),
+            step: for_step(s.step, val),
+            to: default(s.to, val),
+        }),
+        Int::Or(l, r) => Int::Or(
+            Box::new(int_op(l, right, default.clone(), for_step.clone())?),
+            Box::new(int_op(r, right, default, for_step)?),
+        ),
+        Int::Infinite => Int::Infinite,
+        Int::LowBound(l) => Int::LowBound(default(*l, val)),
+        Int::HighBound(l) => Int::LowBound(default(*l, val)),
+        Int::And(l, r) => Int::Or(
+            Box::new(int_op(l, right, default.clone(), for_step.clone())?),
+            Box::new(int_op(r, right, default, for_step)?),
+        ),
+    })
+}
+
 impl Int {
-    pub(crate) fn try_convert_to_value(self, value: i128) -> Result<VecType<Self>, String> {
+    pub(crate) fn add_int(&self, int: &Int) -> Result<Self, String> {
+        int_op(self, int, Add::add, |x, y| x)
+    }
+    pub(crate) fn mul_int(&self, int: &Int) -> Result<Self, String> {
+        int_op(self, int, Add::add, |x, y| x * y)
+    }
+    pub(crate) fn sub_int(&self, int: &Int) -> Result<Self, String> {
+        int_op(self, int, Sub::sub, |x, y| x)
+    }
+    pub(crate) fn div_int(&self, int: &Int) -> Result<Self, String> {
+        int_op(self, int, Div::div, |x, y| x / y)
+    }
+    pub(crate) fn pow_int(&self, int: &Int) -> Result<Self, String> {
+        int_op(self, int, |x, y| x.pow(y as u32), |x, y| x.pow(y as u32))
+    }
+    pub fn neg_int(&self) -> Result<Self, String> {
+        Ok(match self {
+            Int::Infinite => Self::Infinite,
+            Int::Value(v) => Int::Value(-v),
+            Int::LowBound(v) => Int::LowBound(-v),
+            Int::HighBound(v) => Int::HighBound(-v),
+            Int::Slice(s) => unimplemented!(),
+            Int::Or(l, r) => Int::Or(Box::new(l.neg()?), Box::new(r.neg()?)),
+            Int::And(l, r) => Int::And(Box::new(l.neg()?), Box::new(r.neg()?)),
+        })
+    }
+}
+/*
+impl Int {
+    pub(crate) fn try_convert_to_value(self, value: i128) -> Result<Self, String> {
         match self {
-            Int::Value(i) if i == value => Ok(VecType::one(self)),
+            Int::Value(i) if i == value => Ok(Int::Value(i)),
             Int::Bound(OneRangeIntBound::None) => Ok(VecType::one(Int::Value(value))),
             Int::Bound(OneRangeIntBound::Low(low)) if low <= value => {
                 Ok(VecType::one(Int::Value(value)))
@@ -384,7 +193,7 @@ impl Int {
                 Ok(VecType::one(Int::Value(value)))
             }
             Int::Slice(s) if s.contain(value) => Ok(VecType::one(Int::Value(value))),
-            _ => Err(format!("Void type!")),
+            //_ => Err(format!("Void type!")),
         }
     }
     pub(crate) fn try_add_low_bound(self, value: i128) -> Result<VecType<Self>, String> {
@@ -550,49 +359,7 @@ impl Int {
         }
     }
 }
-
-#[derive(Debug, PartialEq, Clone)]
-pub enum OneRangeIntBound {
-    None,
-    NotEqual(i128),
-    Low(i128),
-    High(i128),
-}
-
-impl Display for OneRangeIntBound {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        match self {
-            OneRangeIntBound::None => write!(f, "Int"),
-            OneRangeIntBound::NotEqual(i) => write!(f, "val!={}", i),
-            OneRangeIntBound::Low(i) => write!(f, "val>={}", i),
-            OneRangeIntBound::High(i) => write!(f, "val<={}", i),
-        }
-    }
-}
-
-impl OneRangeIntBound {
-    fn map<F: Fn(i128) -> i128>(self, label: &str, f: F) -> Result<Self, String> {
-        match self {
-            OneRangeIntBound::None => Err(format!("try {} to empty bound", label)),
-            OneRangeIntBound::Low(l) => Ok(OneRangeIntBound::Low(f(l))),
-            OneRangeIntBound::NotEqual(l) => Ok(OneRangeIntBound::NotEqual(f(l))),
-            OneRangeIntBound::High(h) => Ok(OneRangeIntBound::High(f(h))),
-        }
-    }
-
-    pub fn add(self, val: i128) -> Result<Self, String> {
-        self.map("add", |v| v + val)
-    }
-    pub fn mul(self, val: i128) -> Result<Self, String> {
-        self.map("mul", |v| v * val)
-    }
-    pub fn div(self, val: i128) -> Result<Self, String> {
-        self.map("mul", |v| v / val)
-    }
-    pub fn pow(self, val: i128) -> Result<Self, String> {
-        self.map("mul", |v| v.pow(val as u32))
-    }
-}
+*/
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Slice {
@@ -622,48 +389,5 @@ impl Slice {
             true => unimplemented!(),
             false => unimplemented!(),
         }
-    }
-}
-
-impl VecType<Int> {
-    pub fn try_convert_to_value(self, value: i128) -> Result<Self, String> {
-        self.0
-            .into_iter()
-            .map(|i| i.try_convert_to_value(value.clone()))
-            .collect::<Result<Vec<_>, _>>()
-            .map(|res| res.into_iter().next().unwrap())
-    }
-    pub fn try_add_low_bound(self, value: i128) -> Result<Self, String> {
-        self.0
-            .into_iter()
-            .map(|i| i.try_add_low_bound(value.clone()))
-            .collect::<Result<Vec<_>, _>>()
-            .map(|r| r.into_iter().flatten().collect::<Self>())
-    }
-    pub fn try_add_high_bound(self, value: i128) -> Result<Self, String> {
-        self.0
-            .into_iter()
-            .map(|i| i.try_add_high_bound(value.clone()))
-            .collect::<Result<Vec<_>, _>>()
-            .map(|r| r.into_iter().flatten().collect::<Self>())
-    }
-    pub fn try_add_not_eq_bound(self, value: i128) -> Result<Self, String> {
-        self.0
-            .into_iter()
-            .map(|i| i.try_add_not_eq_bound(value.clone()))
-            .collect::<Result<Vec<_>, _>>()
-            .map(|r| r.into_iter().flatten().collect::<Self>())
-    }
-    pub fn try_add_slice_bound(self, value: Slice) -> Result<Self, String> {
-        self.0
-            .into_iter()
-            .map(|i| i.try_add_slice_bound(value.clone()))
-            .collect::<Result<Vec<_>, _>>()
-            .map(|r| r.into_iter().flatten().collect::<Self>())
-    }
-    pub fn with(self, other: Self) -> Self {
-        let mut vec = self.0;
-        vec.extend_from_slice(other.as_slice());
-        Self(vec)
     }
 }
