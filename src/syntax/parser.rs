@@ -108,9 +108,19 @@ peg::parser! { grammar lang() for str {
         }
 
     rule logic(i: usize) -> Token = precedence! {
-        x:(@) inli(i) "#" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::CallFunction(Box::new(x), Box::new(y))) }
+        x:(@) " " y:@ { Token::new(x.span.extend(&y.span), Ast::CallFunction(Box::new(x), Box::new(y))) }
         --
         x:(@) inli(i) "." inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Dot(Box::new(x), Box::new(y))) }
+        --
+        x:(@) fs:position!() inli(i) "`" id:ident() "`" end:position!() inli(i) y:@ {
+            Token::new(x.span.extend(&y.span), Ast::CallFunction(
+                Box::new(Token::new(x.span.extend(&Span::new(fs, end)), Ast::CallFunction(
+                    Box::new(Token::new(Span::new(fs, end), Ast::Ident(id.to_string()))),
+                    Box::new(x),
+                ))),
+                Box::new(y),
+            ))
+        }
         --
         x:(@) inli(i) "|" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Or(Box::new(x), Box::new(y))) }
         --
@@ -177,17 +187,14 @@ peg::parser! { grammar lang() for str {
         s:position!() "val" e:position!() { Token::new(Span::new(s, e), Ast::Val) } /
         id:ident() { Token::new(id.span, Ast::Ident(id.inner())) } /
         s:position!() slice:slice() e:position!() { Token::new(Span::new(s, e), Ast::Slice(slice)) } /
-        s:position!() "{" _ id:ident() _ ":" _ ty:type_definition(i) "}" e:position!() { Token::new(Span::new(s, e), Ast::Named(id, Box::new(ty))) }
+        s:position!() "{" _ id:ident() _ ":" _ ty:type_definition(i) _ "}" e:position!() { Token::new(Span::new(s, e), Ast::Named(id, Box::new(ty))) }
 
     rule single(i: usize) -> Token
         = num() /
-        s:position!() left:logic2(i) " " right:logic2(i) e:position!() {
-            Token::new(Span::new(s, e), Ast::CallFunction(Box::new(left), Box::new(right)))
-        } /
         s:position!() "val" e:position!() { Token::new(Span::new(s, e), Ast::Val) } /
         id:ident() { Token::new(id.span, Ast::Ident(id.inner())) } /
         s:position!() slice:slice() e:position!() { Token::new(Span::new(s, e), Ast::Slice(slice)) } /
-        s:position!() "{" _ id:ident() _ ":" _ ty:type_definition(i) "}" e:position!() { Token::new(Span::new(s, e), Ast::Named(id, Box::new(ty))) }
+        s:position!() "{" _ id:ident() _ ":" _ ty:type_definition(i) _ "}" e:position!() { Token::new(Span::new(s, e), Ast::Named(id, Box::new(ty))) }
 
     rule slice() -> Slice
         = "[" _ first:spanned_int() _ "," _ second:spanned_int() _ ".." _ last:spanned_int() _ "]" {

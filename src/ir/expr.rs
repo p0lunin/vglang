@@ -1,9 +1,10 @@
 use crate::common::{Context, Error, Span};
 use crate::ir::objects::{Object, Var};
 use crate::ir::types::base_types::Function;
-use crate::ir::types::{Type, TypeOperable};
+use crate::ir::types::Type;
 use crate::syntax::ast::{Ast, Token};
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
 use std::ops::Deref;
 use std::rc::Rc;
 
@@ -12,6 +13,12 @@ pub struct Expr {
     pub ty: Rc<Type>,
     pub span: Span,
     pub kind: ExprKind,
+}
+
+impl Display for Expr {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        Display::fmt(&self.kind, f)
+    }
 }
 
 impl Expr {
@@ -52,6 +59,18 @@ pub enum ExprKind {
     },
 }
 
+impl Display for ExprKind {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match self {
+            Self::Ident(i) => Display::fmt(i, f),
+            Self::Int(i) => Display::fmt(i, f),
+            Self::Add(l, r) => write!(f, "({} + {})", l, r),
+            Self::Application(l, r) => write!(f, "({} {})", l, r),
+            _ => unimplemented!(),
+        }
+    }
+}
+
 impl Expr {
     pub fn convert_to_type(self) -> Result<Rc<Type>, Error> {
         match self.kind {
@@ -72,7 +91,7 @@ impl Expr {
             ExprKind::LeOrEq(_, _) => Ok(Rc::new(Type::Expr(self))),
             ExprKind::Neg(_) => Ok(Rc::new(Type::Expr(self))),
             ExprKind::Ident(_) => Ok(Rc::new(Type::Expr(self))),
-            ExprKind::Application(_, _) => unimplemented!(),
+            ExprKind::Application(_, _) => Ok(Rc::new(Type::Expr(self))),
             ExprKind::Let {
                 var: _,
                 assign: _,
@@ -98,7 +117,43 @@ fn op_expr<F: Fn(Box<Expr>, Box<Expr>) -> ExprKind>(
             left.span.extend(&right.span),
             func(Box::new(left), Box::new(right)),
         )),
-        _ => Err("Error".to_string()),
+        (Type::Expr(e), Type::Int) => match e.ty.deref() {
+            Type::Int => Ok(Expr::new(
+                Rc::new(Type::Int),
+                left.span.extend(&right.span),
+                func(Box::new(left), Box::new(right)),
+            )),
+            _ => Err(format!(
+                "Arithmetic ops only for ints, got {} and {}",
+                left.ty, right.ty
+            )),
+        },
+        (Type::Int, Type::Expr(e)) => match e.ty.deref() {
+            Type::Int => Ok(Expr::new(
+                Rc::new(Type::Int),
+                left.span.extend(&right.span),
+                func(Box::new(left), Box::new(right)),
+            )),
+            _ => Err(format!(
+                "Arithmetic ops only for ints, got {} and {}",
+                left.ty, right.ty
+            )),
+        },
+        (Type::Expr(e), Type::Expr(e2)) => match (e.ty.deref(), e2.ty.deref()) {
+            (Type::Int, Type::Int) => Ok(Expr::new(
+                Rc::new(Type::Int),
+                left.span.extend(&right.span),
+                func(Box::new(left), Box::new(right)),
+            )),
+            _ => Err(format!(
+                "Arithmetic ops only for ints, got {} and {}",
+                left.ty, right.ty
+            )),
+        },
+        _ => Err(format!(
+            "Arithmetic ops only for ints, got {} and {}",
+            left.ty, right.ty
+        )),
     }
 }
 
@@ -396,7 +451,7 @@ pub fn parse_expr(
                 None => unimplemented!(),
             }
         }
-        Ast::Parenthesis(t) => parse_expr(token, ctx, g, expected),
+        Ast::Parenthesis(t) => parse_expr(t.as_ref(), ctx, g, expected),
         Ast::Double(_) => unimplemented!(),
         Ast::Ident(i) => {
             let expr = match i.as_str() {
@@ -435,20 +490,36 @@ pub fn parse_expr(
         Ast::Implication(l, r) => {
             let exp = Some(Type::typ());
             let left = parse_expr(l, ctx, g, exp.clone())?
-                .ok_or_else(|| Error::cannot_infer_type(token.span))?;
-            let right = parse_expr(r, ctx, g, exp.clone())?
+                .ok_or_else(|| Error::cannot_infer_type(token.span))?
+                .convert_to_type()?;
+            let left_types = left.types_in_scope();
+            let new_ctx = Context {
+                objects: left_types
+                    .into_iter()
+                    .map(|(name, ty)| Object::Var(Rc::new(Var { name, ty })))
+                    .collect(),
+                parent: Some(ctx),
+            };
+            let right = parse_expr(r, &new_ctx, g, exp.clone())?
                 .ok_or_else(|| Error::cannot_infer_type(token.span))?;
             let expr = Expr::new(
                 Type::typ(),
                 token.span,
                 ExprKind::Type(Rc::new(Type::Function(Function {
-                    get_value: left.convert_to_type()?,
+                    get_value: left,
                     return_value: right.convert_to_type()?,
                 }))),
             );
             check_type(expr, expected)
         }
-        Ast::Named(_, _) => unimplemented!(),
+        Ast::Named(name, ty) => {
+            let ty = parse_expr(ty, ctx, g, None)?.unwrap().convert_to_type()?; // TODO
+            Ok(Some(Expr::new(
+                ty,
+                token.span,
+                ExprKind::Ident(name.clone().inner()),
+            )))
+        }
         Ast::CallFunction(left, right) => {
             let right = parse_expr(right.as_ref(), ctx, g, None)?;
             match right {

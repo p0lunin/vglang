@@ -1,4 +1,5 @@
 use crate::common::{Context, Error, Spanned};
+use crate::interpreter::proof_func;
 use crate::ir::expr::parse_expr;
 use crate::ir::objects::{Arg, FunctionDefinition, FunctionObject, Object, TypeObject};
 use crate::ir::types::{Generic, Type};
@@ -64,12 +65,7 @@ pub fn parse_function(
             let ctx = Context {
                 objects: Type::types_in_scope(&func_type)
                     .into_iter()
-                    .map(|(name, ty)| {
-                        Object::Type(Rc::new(TypeObject {
-                            name: name.inner(),
-                            def: ty,
-                        }))
-                    })
+                    .map(|(name, ty)| Object::Type(Rc::new(TypeObject { name, def: ty })))
                     .collect(),
                 parent: Some(&ctx),
             };
@@ -90,12 +86,14 @@ pub fn parse_function(
             )?
             .unwrap(); // TODO
 
-            impls.add_function(FunctionObject {
+            let f = FunctionObject {
                 def: func_def.clone(),
                 //generics: vec![],
                 args,
                 body: expr,
-            });
+            };
+            proof_func(&f, impls.functions.as_slice(), &ctx)?;
+            impls.add_function(f);
 
             Ok(Object::FunctionDefinition(func_def))
         }

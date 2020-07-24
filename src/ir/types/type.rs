@@ -1,7 +1,7 @@
 use crate::common::Spanned;
 use crate::ir::objects::{DataType, DataVariant};
 use crate::ir::types::base_types::Function;
-use crate::ir::Expr;
+use crate::ir::{Expr, ExprKind};
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
 use std::rc::Rc;
@@ -38,6 +38,8 @@ impl Type {
             (Type::Int, Type::Int) => true,
             (_, Type::Type) => true,
             (Type::Generic(l), Type::Generic(r)) => l.name.as_str() == r.name.as_str(),
+            (t, Type::Expr(e)) => t.is_part_of(&e.ty),
+            (Type::Expr(e), t) => e.ty.is_part_of(t),
             _ => false,
         }
     }
@@ -80,7 +82,7 @@ impl Display for Type {
             Type::DataVariant(g) => Display::fmt(g, f),
             Type::Never => f.write_str("Never"),
             Type::Unknown => f.write_str("Unknown"),
-            Type::Expr(e) => unimplemented!(),
+            Type::Expr(e) => Display::fmt(e, f),
         }
     }
 }
@@ -166,7 +168,7 @@ impl Type {
             _ => vec![self.clone()],
         }
     }
-    pub fn types_in_scope(self: &Rc<Type>) -> Vec<(Spanned<String>, Rc<Type>)> {
+    pub fn types_in_scope(self: &Rc<Type>) -> Vec<(String, Rc<Type>)> {
         let mut types = vec![];
         match self.deref() {
             Type::Function(f) => {
@@ -177,7 +179,10 @@ impl Type {
                 types.append(&mut Type::types_in_scope(get_value));
                 types.append(&mut Type::types_in_scope(return_value));
             }
-            Type::Expr(e) => unimplemented!(),
+            Type::Expr(e) => match &e.kind {
+                ExprKind::Ident(i) => types.push((i.clone(), e.ty.clone())),
+                _ => {}
+            },
             _ => {}
         };
         types

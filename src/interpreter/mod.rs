@@ -1,259 +1,174 @@
+mod z3_converter;
+
 use crate::common::{Context, Error, HasName};
-use crate::ir::objects::{
-    DataVariant, FunctionObject,
-};
+use crate::interpreter::z3_converter::{Consts, ProofContext};
+use crate::ir::objects::{Arg, DataVariant, FunctionDefinition, FunctionObject, Object, Var};
 use crate::ir::types::Type;
 use crate::ir::{parse_expr, Expr, ExprKind};
 use crate::peg_error_to_showed;
 use crate::syntax::parse_token;
 use itertools::Itertools;
+use std::cell::RefCell;
 use std::fmt::{Display, Formatter};
 use std::ops;
 use std::ops::Deref;
 use std::rc::Rc;
-use std::cell::RefCell;
+use z3::Solver;
 
 #[derive(Debug)]
 pub struct Interpreter<'a> {
-    enums: Vec<Rc<EnumInstance>>,
-    functions: Vec<FunctionObject>,
-    ir_ctx: IrContext,
-    ctx: Context<'a, AllObject>,
+    // enums: Vec<Rc<EnumInstance>>,
+    functions: &'a [FunctionObject],
+    ctx: &'a Context<'a, Object>,
 }
 
 impl<'a> Interpreter<'a> {
-    pub fn from_ir_context(ctx: Context<'a, AllObject>, ir: IrContext) -> Interpreter<'a> {
-        let IrContext {
-            functions,
-            specialized_enums,
-            specialized_functions: _,
-        } = &ir;
-        Self {
-            enums: specialized_enums.clone(),
-            functions: functions.clone(),
-            ir_ctx: ir,
-            ctx,
-        }
+    pub fn new(functions: &'a [FunctionObject], ctx: &'a Context<'a, Object>) -> Self {
+        Interpreter { functions, ctx }
     }
+}
 
-    pub fn execute_code(&mut self, text: &str) -> Result<ByteCode, String> {
-        let tokens = parse_token(text).map_err(|e| peg_error_to_showed(e, text))?;
-        let e = parse_expr(tokens, &self.ctx, &mut self.ir_ctx).map_err(|e| e.display(text))?;
-        type_check_expr(&e, &self.ctx, &mut self.ir_ctx).map_err(|e| e.display(text))?;
-        self.eval_expr(
-            e,
-            &Context {
-                objects: vec![],
-                parent: None,
-            },
-        )
-        .map_err(|e| e.display(text))
-    }
-
-    fn eval_expr(&self, e: Expr, ctx: &Context<ByteCode>) -> Result<ByteCode, Error> {
-        let span = e.span();
-        match e.kind {
-            ExprKind::Object(o) => match o {
-                AllObject::CurriedFunction(f) => self.eval_fn(&f, ctx),
-                AllObject::Arg(a) => match ctx.find(a.name.as_str()) {
-                    Some(ByteCode::Var(_, b)) => Ok(b.as_ref().clone()),
-                    _ => Err(Error::Span(span)),
-                },
-                AllObject::EnumVariantInstance(inst) => {
-                    let datas = inst
-                        .data
-                        .iter()
-                        .map(|e| self.eval_expr(e.clone(), ctx))
-                        .collect::<Result<Vec<_>, _>>()?;
-                    Ok(ByteCode::EnumVariant(inst.variant.clone(), datas))
-                }
-                AllObject::FunctionDefinition(f) => {
-                    self.eval_fn(&Rc::new(CurriedFunction {
-                        ftype: f.ftype.clone(),
-                        scope: vec![],
-                        orig: Callable::FuncDef(f),
-                        instance: RefCell::new(None)
-                    }), ctx)
-                }
-                o => Ok(ByteCode::Object(o)),
-            },
-            ExprKind::Int(i) => Ok(ByteCode::Int(i)),
-            ExprKind::Add(l, r) => self.eval_arithmetic_op(l, r, ctx, ops::Add::add),
-            ExprKind::Sub(l, r) => self.eval_arithmetic_op(l, r, ctx, ops::Sub::sub),
-            ExprKind::Mul(l, r) => self.eval_arithmetic_op(l, r, ctx, ops::Mul::mul),
-            ExprKind::Div(l, r) => self.eval_arithmetic_op(l, r, ctx, ops::Div::div),
-            ExprKind::Pow(l, r) => self.eval_arithmetic_op(l, r, ctx, |l, r| l.pow(r as u32)),
-            ExprKind::And(_, _) => unimplemented!(),
-            ExprKind::Or(_, _) => unimplemented!(),
-            ExprKind::Gr(l, r) => { 
-                self.eval_logic_func(l, r, ctx, i128::gt)
-            },
-            ExprKind::Eq(l, r) => {
-                self.eval_logic_func(l, r, ctx, i128::eq)
-            },
-            ExprKind::NotEq(l, r) => {
-                self.eval_logic_func(l, r, ctx, i128::ne)
-            },
-            ExprKind::GrOrEq(l, r) => {
-                self.eval_logic_func(l, r, ctx, i128::ge)
-            },
-            ExprKind::Le(l, r) => {
-                self.eval_logic_func(l, r, ctx, i128::lt)
-            },
-            ExprKind::LeOrEq(l, r) => {
-                self.eval_logic_func(l, r, ctx, i128::le)
-            },
-            ExprKind::Neg(l) => {
-                let span = l.span();
-                self.eval_expr(*l, ctx).and_then(|b| match b {
-                    ByteCode::Int(i) => Ok(ByteCode::Int(-i)),
-                    _ => Err(Error::Span(span)),
-                })
-            }
-            ExprKind::Let { var, assign, expr } => {
-                let var_val = self.eval_expr(*assign, ctx)?;
-                let var = ByteCode::Var(var.name.clone().inner(), Box::new(var_val));
-                let ctx = Context {
-                    objects: vec![var],
-                    parent: Some(ctx),
-                };
-                return self.eval_expr(*expr, &ctx);
-            }
-            ExprKind::IfThenElse {
-                condition,
-                then_arm,
-                else_arm,
-            } => {
-                let cond = self.eval_expr(*condition, ctx)?;
-                match cond {
-                    ByteCode::EnumVariant(v, _) => match v.orig.name.as_str() {
-                        "True" => self.eval_expr(*then_arm, ctx),
-                        "False" => self.eval_expr(*else_arm, ctx),
-                        _ => unreachable!(),
+impl Interpreter<'_> {
+    pub fn eval(&self, expr: &Expr, bc_ctx: &Context<'_, ByteCode>) -> Result<ByteCode, Error> {
+        match &expr.kind {
+            ExprKind::Int(i) => Ok(ByteCode::Int(*i)),
+            ExprKind::Ident(i) => match bc_ctx.find(i.as_str()) {
+                Some(b) => Ok(b.clone()),
+                None => match self.ctx.find(i.as_str()) {
+                    Some(o) => match o {
+                        Object::FunctionDefinition(def) => {
+                            self.eval_func(vec![], Callable::Func(def.clone()), def.ftype.clone())
+                        }
+                        Object::Enum(_) => unimplemented!(),
+                        Object::EnumVariant(_) => unimplemented!(),
+                        Object::Arg(_) => unimplemented!(),
+                        Object::Var(_) => unimplemented!(),
+                        Object::Type(_) => unimplemented!(),
                     },
-                    _ => unreachable!(),
-                }
-            }
-        }
-    }
-
-    fn eval_fn(&self, f: &Rc<CurriedFunction>, ctx: &Context<ByteCode>) -> Result<ByteCode, Error> {
-        match Type::get_inner_cell(&f.ftype).borrow().deref() {
-            Type::Function(_) => {
-                return Ok(ByteCode::Object(AllObject::CurriedFunction(f.clone())))
-            }
-            _ => {}
-        };
-        match &f.orig {
-            Callable::FuncDef(f1) => match self.functions.iter().find(|&f2| **f1 == *f2.def) {
-                Some(obj) => {
-                    let ctx = Context {
-                        objects: f
-                            .scope
-                            .iter()
-                            .zip(obj.args.iter())
-                            .map(|(e, a)| {
-                                self.eval_expr(e.clone(), ctx)
-                                    .map(|b| ByteCode::Var(a.name.clone().inner(), Box::new(b)))
-                            })
-                            .collect::<Result<Vec<_>, _>>()?,
-                        parent: Some(ctx),
-                    };
-                    self.eval_expr(obj.body.as_ref().clone(), &ctx)
-                }
-                None => Err(Error::Custom(
-                    f.orig.name().span,
-                    "Not found".to_owned(),
-                    "this".to_owned(),
-                )),
+                    None => Err(Error::custom(expr.span, format!("Not found {}", i))),
+                },
             },
+            ExprKind::Application(l, r) => self.eval(l.as_ref(), bc_ctx).and_then(|left| {
+                self.eval(r.as_ref(), bc_ctx).and_then(|right| match left {
+                    ByteCode::ApplicationFunction(mut args, func, ty) => {
+                        args.push(right);
+                        let ty = match ty.deref() {
+                            Type::Function(f) => f.return_value.clone(),
+                            otherwise => ty,
+                        };
+                        self.eval_func(args, func, ty)
+                    }
+                    _ => unimplemented!(),
+                })
+            }),
+            ExprKind::Add(l, r) => self.eval(l, bc_ctx).and_then(|left| {
+                self.eval(r, bc_ctx)
+                    .and_then(|right| ByteCode::add(left, right))
+            }),
             _ => unimplemented!(),
         }
     }
-
-    fn eval_logic_func<F: Fn(&i128, &i128) -> bool>(&self, left: Box<Expr>, right: Box<Expr>, ctx: &Context<'_, ByteCode>, f: F) -> Result<ByteCode, Error> {
-        let left = self.eval_expr(*left, ctx)?;
-        let right = self.eval_expr(*right, ctx)?;
-        match (left, right) {
-            (ByteCode::Int(i1), ByteCode::Int(i2)) => {
-                let bool_enum = match self.ctx.find("Bool").unwrap() {
-                    AllObject::Enum(e) => e,
-                    _ => unreachable!(),
-                }.borrow();
-                match f(&i1, &i2) {
-                    true => Ok(ByteCode::EnumVariant(
-                        bool_enum.variants.iter()
-                            .find(|v| v.orig.name.as_str() == "True")
-                            .unwrap()
-                            .clone(),
-                        vec![]
-                    )),
-                    false => Ok(ByteCode::EnumVariant(
-                        bool_enum.variants.iter()
-                            .find(|v| v.orig.name.as_str() == "False")
-                            .unwrap()
-                            .clone(),
-                        vec![]
-                    ))
-                }
-            }
-            _ => unreachable!()
-        }
-    }
-
-    fn eval_arithmetic_op<F: Fn(i128, i128) -> i128>(
+    fn eval_func(
         &self,
-        left: Box<Expr>,
-        right: Box<Expr>,
-        ctx: &Context<ByteCode>,
-        f: F,
+        args: Vec<ByteCode>,
+        cal: Callable,
+        ty: Rc<Type>,
     ) -> Result<ByteCode, Error> {
-        let new_span = left.span().extend(&right.span());
-        let left = self.eval_expr(*left, ctx)?;
-        let right = self.eval_expr(*right, ctx)?;
-        match (left, right) {
-            (ByteCode::Int(i1), ByteCode::Int(i2)) => Ok(ByteCode::Int(f(i1, i2))),
-            _ => Err(Error::Span(new_span)),
+        match ty.deref() {
+            Type::Function(_) => Ok(ByteCode::ApplicationFunction(args, cal, ty)),
+            _ => match cal {
+                Callable::Func(def) => {
+                    let imp = &self.functions.iter().find(|f| f.def == def).unwrap();
+                    self.eval(
+                        &imp.body,
+                        &Context {
+                            objects: imp
+                                .args
+                                .iter()
+                                .zip(args.into_iter())
+                                .map(|(arg, data)| ByteCode::Arg(arg.clone(), Box::new(data)))
+                                .collect(),
+                            parent: None,
+                        },
+                    )
+                }
+            },
         }
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Clone)]
+pub enum Callable {
+    Func(Rc<FunctionDefinition>),
+}
+
+impl HasName for Callable {
+    fn name(&self) -> &str {
+        match self {
+            Callable::Func(f) => f.name.as_str(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum ByteCode {
-    Object(AllObject),
-    Var(String, Box<ByteCode>),
-    EnumVariant(Rc<DataVariant>, Vec<ByteCode>),
+    ApplicationFunction(Vec<ByteCode>, Callable, Rc<Type>),
     Int(i128),
+    Var(Rc<Var>, Box<ByteCode>),
+    Arg(Rc<Arg>, Box<ByteCode>),
+}
+
+impl ByteCode {
+    fn add(self, other: Self) -> Result<Self, Error> {
+        match (self, other) {
+            (ByteCode::Int(i), ByteCode::Int(i2)) => Ok(ByteCode::Int(i + i2)),
+            (ByteCode::Var(_, bc), right) => bc.add(right),
+            (left, ByteCode::Var(_, bc)) => left.add(*bc),
+            (ByteCode::Arg(_, bc), right) => bc.add(right),
+            (left, ByteCode::Arg(_, bc)) => left.add(*bc),
+            _ => unimplemented!(),
+        }
+    }
 }
 
 impl HasName for ByteCode {
     fn name(&self) -> &str {
         match self {
-            ByteCode::Object(o) => o.name(),
-            ByteCode::Var(v, _) => v.as_str(),
-            ByteCode::Int(_) => unreachable!(),
-            ByteCode::EnumVariant(e, _) => e.name(),
+            ByteCode::ApplicationFunction(_, f, _) => f.name(),
+            ByteCode::Int(_) => "",
+            ByteCode::Var(v, _) => v.name.as_str(),
+            ByteCode::Arg(a, _) => a.name.as_str(),
         }
     }
 }
 
-impl Display for ByteCode {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        match self {
-            ByteCode::Int(i) => write!(f, "{}", i),
-            ByteCode::Object(o) => write!(f, "{}", o),
-            ByteCode::EnumVariant(e, data) => {
-                write!(f, "{}", e)?;
-                match data.as_slice() {
-                    [] => {}
-                    [xs @ ..] => {
-                        write!(f, ": ");
-                        write!(f, "({})", xs.iter().map(|d| d.to_string()).join(", "))?;
-                    }
-                }
-                Ok(())
-            }
-            _ => unreachable!(),
-        }
-    }
+pub fn proof_func(
+    f: &FunctionObject,
+    objects: &[FunctionObject],
+    objs_ctx: &Context<'_, Object>,
+) -> Result<(), Error> {
+    let body = &f.body;
+    let config = z3::Config::new();
+    let ctx = z3::Context::new(&config);
+    let solver = z3::Solver::new(&ctx);
+    let mut ctx = ProofContext {
+        solver,
+        prefix: f.def.name.clone().inner() + "_",
+        interpreter: Interpreter::new(objects, objs_ctx),
+    };
+    let mut consts = Consts::new();
+
+    f.args.iter().for_each(|arg| {
+        ctx.declare_var(
+            ctx.prefix.clone() + arg.name.as_str(),
+            arg.ty.deref(),
+            &mut consts,
+        );
+    });
+
+    ctx.proof_check(
+        body.clone(),
+        f.def.ftype.clone().get_return_value().deref(),
+        &mut consts,
+    )
 }

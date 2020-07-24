@@ -13,7 +13,6 @@ impl<T> SpannedError<T> for Result<T, String> {
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
-    Span(Span),
     NotDefined(Span, &'static str),
     Convert(Span, &'static str),
     DifferentTypes(Span, Span),
@@ -23,9 +22,11 @@ pub enum Error {
 }
 
 impl Error {
+    pub fn custom<T: Into<String>>(span: Span, desc: T) -> Self {
+        Self::Custom(span, desc.into(), "-here".to_string())
+    }
     pub fn span(&self) -> Span {
         match self {
-            Error::Span(s) => *s,
             Error::NotDefined(s, _) => *s,
             Error::Convert(s, _) => *s,
             Error::DifferentTypes(s, _) => *s,
@@ -33,10 +34,6 @@ impl Error {
             Error::VoidType(s) => *s,
             Error::Custom(s, _, _) => *s,
         }
-    }
-
-    pub fn map_span(self, span: Span) -> Self {
-        Error::Span(span)
     }
 }
 
@@ -46,14 +43,6 @@ impl Error {
     }
     pub fn display(&self, source: &str) -> String {
         match self {
-            Error::Span(span) => ErrorMsgBuilder::default_one_span(
-                *span,
-                source,
-                "Error",
-                "Something wrong",
-                "- here",
-            )
-            .build(),
             Error::NotDefined(span, t) => ErrorMsgBuilder::new(*span, source)
                 .error_kind("Error")
                 .description(&format!("Not defined {}", t))
