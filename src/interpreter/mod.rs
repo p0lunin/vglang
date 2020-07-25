@@ -158,13 +158,16 @@ pub fn proof_func(
     };
     let mut consts = Consts::new();
 
-    f.args.iter().for_each(|arg| {
-        ctx.declare_var(
-            ctx.prefix.clone() + arg.name.as_str(),
-            arg.ty.deref(),
-            &mut consts,
-        );
-    });
+    f.args
+        .iter()
+        .map(|arg| {
+            ctx.declare_var(
+                ctx.prefix.clone() + arg.name.as_str(),
+                arg.ty.deref(),
+                &mut consts,
+            )
+        })
+        .collect::<Result<_, _>>()?;
 
     ctx.proof_check(
         body.clone(),

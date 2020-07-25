@@ -17,6 +17,7 @@ pub enum Type {
     Never,
     Generic(Generic),
     Expr(Expr),
+    Named(String, Rc<Type>),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -40,6 +41,8 @@ impl Type {
             (Type::Generic(l), Type::Generic(r)) => l.name.as_str() == r.name.as_str(),
             (t, Type::Expr(e)) => t.is_part_of(&e.ty),
             (Type::Expr(e), t) => e.ty.is_part_of(t),
+            (t, Type::Named(_, ty)) => t.is_part_of(ty),
+            (Type::Named(_, t), ty) => t.is_part_of(ty),
             _ => false,
         }
     }
@@ -69,6 +72,14 @@ impl Type {
     /*pub fn int(val: i128) -> Rc<Self> {
         Rc::new(Type::Int(Int::Value(val)))
     }*/
+
+    pub fn get_inner_type(self: &Rc<Type>) -> Rc<Type> {
+        match self.deref() {
+            Type::Expr(e) => e.ty.get_inner_type(),
+            Type::Named(_, ty) => ty.get_inner_type(),
+            _ => self.clone(),
+        }
+    }
 }
 
 impl Display for Type {
@@ -83,6 +94,7 @@ impl Display for Type {
             Type::Never => f.write_str("Never"),
             Type::Unknown => f.write_str("Unknown"),
             Type::Expr(e) => Display::fmt(e, f),
+            Type::Named(n, _) => Display::fmt(n, f),
         }
     }
 }
@@ -179,10 +191,7 @@ impl Type {
                 types.append(&mut Type::types_in_scope(get_value));
                 types.append(&mut Type::types_in_scope(return_value));
             }
-            Type::Expr(e) => match &e.kind {
-                ExprKind::Ident(i) => types.push((i.clone(), e.ty.clone())),
-                _ => {}
-            },
+            Type::Named(name, ty) => types.push((name.clone(), ty.clone())),
             _ => {}
         };
         types

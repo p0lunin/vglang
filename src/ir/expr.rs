@@ -111,45 +111,15 @@ fn op_expr<F: Fn(Box<Expr>, Box<Expr>) -> ExprKind>(
     right: Expr,
     func: F,
 ) -> Result<Expr, String> {
-    match (left.ty.deref(), right.ty.deref()) {
+    match (
+        left.ty.get_inner_type().deref(),
+        right.ty.get_inner_type().deref(),
+    ) {
         (Type::Int, Type::Int) => Ok(Expr::new(
             Rc::new(Type::Int),
             left.span.extend(&right.span),
             func(Box::new(left), Box::new(right)),
         )),
-        (Type::Expr(e), Type::Int) => match e.ty.deref() {
-            Type::Int => Ok(Expr::new(
-                Rc::new(Type::Int),
-                left.span.extend(&right.span),
-                func(Box::new(left), Box::new(right)),
-            )),
-            _ => Err(format!(
-                "Arithmetic ops only for ints, got {} and {}",
-                left.ty, right.ty
-            )),
-        },
-        (Type::Int, Type::Expr(e)) => match e.ty.deref() {
-            Type::Int => Ok(Expr::new(
-                Rc::new(Type::Int),
-                left.span.extend(&right.span),
-                func(Box::new(left), Box::new(right)),
-            )),
-            _ => Err(format!(
-                "Arithmetic ops only for ints, got {} and {}",
-                left.ty, right.ty
-            )),
-        },
-        (Type::Expr(e), Type::Expr(e2)) => match (e.ty.deref(), e2.ty.deref()) {
-            (Type::Int, Type::Int) => Ok(Expr::new(
-                Rc::new(Type::Int),
-                left.span.extend(&right.span),
-                func(Box::new(left), Box::new(right)),
-            )),
-            _ => Err(format!(
-                "Arithmetic ops only for ints, got {} and {}",
-                left.ty, right.ty
-            )),
-        },
         _ => Err(format!(
             "Arithmetic ops only for ints, got {} and {}",
             left.ty, right.ty
@@ -515,9 +485,9 @@ pub fn parse_expr(
         Ast::Named(name, ty) => {
             let ty = parse_expr(ty, ctx, g, None)?.unwrap().convert_to_type()?; // TODO
             Ok(Some(Expr::new(
-                ty,
+                Type::typ(),
                 token.span,
-                ExprKind::Ident(name.clone().inner()),
+                ExprKind::Type(Rc::new(Type::Named(name.clone().inner(), ty))),
             )))
         }
         Ast::CallFunction(left, right) => {

@@ -3,17 +3,28 @@ use crate::common::{Error, Span};
 use crate::interpreter::{ByteCode, Interpreter};
 use crate::ir::types::Type;
 use crate::ir::{Expr, ExprKind};
+use std::convert::TryInto;
 use std::ops::Deref;
 use std::rc::Rc;
 use typed_arena::Arena;
 use z3::ast::{Ast, Bool};
 use z3::{ast, Config, Context, SatResult, Solver};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Z3Ast<'a> {
     Int(ast::Int<'a>),
     Bool(ast::Bool<'a>),
     Array(ast::Array<'a>),
+}
+
+impl<'a> Z3Ast<'a> {
+    pub fn to_dynamic(&self) -> ast::Dynamic<'a> {
+        match self {
+            Z3Ast::Int(i) => i.clone().into(),
+            Z3Ast::Bool(i) => i.clone().into(),
+            Z3Ast::Array(i) => i.clone().into(),
+        }
+    }
 }
 
 pub struct Consts<'a> {
@@ -67,24 +78,25 @@ impl<'a> ProofContext<'a> {
                 );
                 Ok(())
             }
+            Type::Named(_, expr) => self.declare_var(name, expr, consts),
             Type::Expr(e) => {
-                consts.add_named(
-                    match e.ty.deref() {
-                        Type::Int => Z3Ast::Int(ast::Int::new_const(
+                match e.ty.deref() {
+                    Type::Int => consts.add_named(
+                        Z3Ast::Int(ast::Int::new_const(
                             self.solver.get_context(),
-                            name.as_ref(),
+                            name.as_str(),
                         )),
-                        _ => unimplemented!(),
-                    },
-                    name,
-                );
+                        name,
+                    ),
+                    _ => unimplemented!(),
+                };
                 let expr = self.expr_to_z3(e.clone(), consts)?;
                 let expr = consts.add(expr);
                 let var = consts.last_named();
                 match expr {
                     Z3Ast::Int(l) => match var {
                         Z3Ast::Int(i) => {
-                            self.solver.assert(&i._eq(&l));
+                            self.solver.assert(&i._eq(l).try_into().unwrap());
                             Ok(())
                         }
                         _ => unimplemented!(),
@@ -124,11 +136,11 @@ impl<'a> ProofContext<'a> {
 
         match (left, right) {
             (Z3Ast::Int(i1), Z3Ast::Int(i2)) => {
-                self.solver.assert(&i1._eq(i2));
+                self.assert(&i1._eq(i2).try_into().unwrap(), consts);
                 check_err(self.solver.check(), span)
             }
             (Z3Ast::Bool(i1), Z3Ast::Bool(i2)) => {
-                self.solver.assert(&i1._eq(i2));
+                self.assert(&i1._eq(i2).try_into().unwrap(), consts);
                 check_err(self.solver.check(), span)
             }
             _ => unimplemented!(),
@@ -162,7 +174,7 @@ impl<'a> ProofContext<'a> {
                         Z3Ast::Array(i) => Ok(Z3Ast::Array(i.clone())),
                         Z3Ast::Bool(i) => Ok(Z3Ast::Bool(i.clone())),
                     },
-                    None => unimplemented!(),
+                    None => Err(Error::custom(expr.span, "Not found")),
                 }
             }
             _ => Ok(byte_code_to_z3(
@@ -176,6 +188,32 @@ impl<'a> ProofContext<'a> {
                 self.solver.get_context(),
             )),
         }
+    }
+
+    fn assert(&self, expr: &ast::Dynamic, consts: &Consts) {
+        let vars = consts
+            .available_consts
+            .iter()
+            .map(|(_, val)| val.to_dynamic())
+            .collect::<Vec<_>>();
+        self.solver.assert(
+            &ast::forall_const(
+                self.solver.get_context(),
+                vars.iter().collect::<Vec<_>>().as_slice(),
+                &[],
+                expr.into(),
+            )
+            .try_into()
+            .unwrap(),
+        )
+    }
+
+    fn make_name<T: AsRef<str>>(&self, name: T) -> String {
+        self.prefix.clone() + name.as_ref()
+    }
+
+    fn make_sign_name<T: AsRef<str>>(&self, name: T) -> String {
+        self.prefix.clone() + "sign_" + name.as_ref()
     }
 }
 
