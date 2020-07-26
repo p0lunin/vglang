@@ -25,10 +25,18 @@ impl<'a> Z3Ast<'a> {
             Z3Ast::Array(i) => i.clone().into(),
         }
     }
+
+    pub fn _eq(&self, other: &Self) -> Option<Bool> {
+        match (self, other) {
+            (Z3Ast::Int(i1), Z3Ast::Int(i2)) => Some(i1._eq(i2)),
+            _ => unimplemented!(),
+        }
+    }
 }
 
 pub struct Consts<'a> {
     pub(crate) available_consts: Vec<(String, Z3Ast<'a>)>,
+    pub named_with_refinement: Vec<(String, Z3Ast<'a>, Z3Ast<'a>)>,
     pub(crate) values: Arena<Z3Ast<'a>>,
 }
 
@@ -36,8 +44,22 @@ impl<'a> Consts<'a> {
     pub fn new() -> Self {
         Consts {
             available_consts: vec![],
+            named_with_refinement: vec![],
             values: Arena::new(),
         }
+    }
+
+    pub fn find<T: AsRef<str>>(&self, name: T) -> Option<&Z3Ast<'a>> {
+        self.available_consts
+            .iter()
+            .map(|(e, r)| (e, r))
+            .chain(
+                self.named_with_refinement
+                    .iter()
+                    .map(|(name, ast, _)| (name, ast)),
+            )
+            .find(|n| n.0.as_str() == name.as_ref())
+            .map(|res| res.1)
     }
 }
 
@@ -50,6 +72,9 @@ impl<'a> Consts<'a> {
     }
     fn last_named(&self) -> &Z3Ast<'a> {
         &self.available_consts.last().unwrap().1
+    }
+    fn add_refinement(&mut self, ast: Z3Ast<'a>, name: String, expr: Z3Ast<'a>) {
+        self.named_with_refinement.push((name, ast, expr))
     }
 }
 
@@ -80,29 +105,16 @@ impl<'a> ProofContext<'a> {
             }
             Type::Named(_, expr) => self.declare_var(name, expr, consts),
             Type::Expr(e) => {
-                match e.ty.deref() {
-                    Type::Int => consts.add_named(
-                        Z3Ast::Int(ast::Int::new_const(
-                            self.solver.get_context(),
-                            name.as_str(),
-                        )),
-                        name,
-                    ),
+                let var = match e.ty.deref() {
+                    Type::Int => Z3Ast::Int(ast::Int::new_const(
+                        self.solver.get_context(),
+                        name.as_str(),
+                    )),
                     _ => unimplemented!(),
                 };
                 let expr = self.expr_to_z3(e.clone(), consts)?;
-                let expr = consts.add(expr);
-                let var = consts.last_named();
-                match expr {
-                    Z3Ast::Int(l) => match var {
-                        Z3Ast::Int(i) => {
-                            self.solver.assert(&i._eq(l).try_into().unwrap());
-                            Ok(())
-                        }
-                        _ => unimplemented!(),
-                    },
-                    _ => unimplemented!(),
-                }
+                consts.add_refinement(var, name, expr);
+                Ok(())
             }
             _ => unimplemented!(),
         }
@@ -136,11 +148,11 @@ impl<'a> ProofContext<'a> {
 
         match (left, right) {
             (Z3Ast::Int(i1), Z3Ast::Int(i2)) => {
-                self.assert(&i1._eq(i2).try_into().unwrap(), consts);
+                self.assert(i1._eq(i2), consts);
                 check_err(self.solver.check(), span)
             }
             (Z3Ast::Bool(i1), Z3Ast::Bool(i2)) => {
-                self.assert(&i1._eq(i2).try_into().unwrap(), consts);
+                self.assert(i1._eq(i2), consts);
                 check_err(self.solver.check(), span)
             }
             _ => unimplemented!(),
@@ -163,12 +175,7 @@ impl<'a> ProofContext<'a> {
             )),
             ExprKind::Ident(i) => {
                 let var_name = self.prefix.clone() + i.as_str();
-                match consts
-                    .available_consts
-                    .iter()
-                    .find(|n| n.0.as_str() == var_name)
-                    .map(|res| &res.1)
-                {
+                match consts.find(var_name) {
                     Some(ast) => match ast {
                         Z3Ast::Int(i) => Ok(Z3Ast::Int(i.clone())),
                         Z3Ast::Array(i) => Ok(Z3Ast::Array(i.clone())),
@@ -190,18 +197,27 @@ impl<'a> ProofContext<'a> {
         }
     }
 
-    fn assert(&self, expr: &ast::Dynamic, consts: &Consts) {
+    fn assert(&self, expr: ast::Bool, consts: &Consts) {
         let vars = consts
             .available_consts
             .iter()
-            .map(|(_, val)| val.to_dynamic())
+            .map(|(_, a)| a)
+            .chain(consts.named_with_refinement.iter().map(|(_, var, _)| var))
+            .map(Z3Ast::to_dynamic)
             .collect::<Vec<_>>();
+        let body = match refinements_to_z3(
+            self.solver.get_context(),
+            consts.named_with_refinement.as_slice(),
+        ) {
+            Some(b) => b.implies(&expr),
+            None => expr.into(),
+        };
         self.solver.assert(
             &ast::forall_const(
                 self.solver.get_context(),
                 vars.iter().collect::<Vec<_>>().as_slice(),
                 &[],
-                expr.into(),
+                &body.into(),
             )
             .try_into()
             .unwrap(),
@@ -214,6 +230,19 @@ impl<'a> ProofContext<'a> {
 
     fn make_sign_name<T: AsRef<str>>(&self, name: T) -> String {
         self.prefix.clone() + "sign_" + name.as_ref()
+    }
+}
+
+fn refinements_to_z3<'a>(
+    ctx: &'a Context,
+    refinements: &'a [(String, Z3Ast<'a>, Z3Ast<'a>)],
+) -> Option<Bool<'a>> {
+    match refinements {
+        [] => None,
+        [x, xs @ ..] => match refinements_to_z3(ctx, xs) {
+            None => x.1._eq(&x.2),
+            Some(e) => Some(Bool::and(ctx, &[&e, &x.1._eq(&x.2)?])),
+        },
     }
 }
 
