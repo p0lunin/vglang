@@ -10,6 +10,8 @@ use std::fmt::{Display, Formatter};
 use std::ops;
 use std::ops::Deref;
 use std::rc::Rc;
+use crate::syntax::ast::Token;
+use std::collections::HashMap;
 
 #[derive(Debug)]
 pub struct Interpreter<'a> {
@@ -25,6 +27,13 @@ impl<'a> Interpreter<'a> {
 }
 
 impl Interpreter<'_> {
+    pub fn execute_code(&self, token: Token) -> Result<ByteCode, Error> {
+        let ir = parse_expr(&token, self.ctx, &mut HashMap::new(), None)?.ok_or_else(
+            || Error::cannot_infer_type(token.span)
+        )?;
+        self.eval(&ir, &Context::new())
+    }
+    
     pub fn eval(&self, expr: &Expr, bc_ctx: &Context<'_, ByteCode>) -> Result<ByteCode, Error> {
         match &expr.kind {
             ExprKind::Int(i) => Ok(ByteCode::Int(*i)),
@@ -45,7 +54,7 @@ impl Interpreter<'_> {
                 },
             },
             ExprKind::Application(l, r) => self.eval(l.as_ref(), bc_ctx).and_then(|left| {
-                self.eval(r.as_ref(), bc_ctx).and_then(|right| match left {
+                self.eval(r.as_ref(), bc_ctx).and_then(|right| match left.inner() {
                     ByteCode::ApplicationFunction(mut args, func, ty) => {
                         args.push(right);
                         let ty = match ty.deref() {
@@ -54,13 +63,24 @@ impl Interpreter<'_> {
                         };
                         self.eval_func(args, func, ty)
                     }
-                    _ => unimplemented!(),
+                    t => { 
+                        dbg!(t);
+                        unimplemented!()
+                    },
                 })
             }),
             ExprKind::Add(l, r) => self.eval(l, bc_ctx).and_then(|left| {
                 self.eval(r, bc_ctx)
                     .and_then(|right| ByteCode::add(left, right))
             }),
+            ExprKind::Let { var, assign, expr, } => {
+                let assigned = self.eval(assign.as_ref(), bc_ctx)?;
+                let ctx = Context {
+                    objects: vec![ByteCode::Var(var.clone(), Box::new(assigned))],
+                    parent: Some(bc_ctx)
+                };
+                self.eval(expr.as_ref(), &ctx)
+            }
             _ => unimplemented!(),
         }
     }
@@ -98,6 +118,14 @@ pub enum Callable {
     Func(Rc<FunctionDefinition>),
 }
 
+impl Display for Callable {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match self {
+            Callable::Func(d) => write!(f, "{}", d.name)
+        }
+    }
+}
+
 impl HasName for Callable {
     fn name(&self) -> &str {
         match self {
@@ -112,6 +140,29 @@ pub enum ByteCode {
     Int(i128),
     Var(Rc<Var>, Box<ByteCode>),
     Arg(Rc<Arg>, Box<ByteCode>),
+}
+
+impl ByteCode {
+    fn inner(self) -> Self {
+        match self {
+            ByteCode::Var(_, b) => *b,
+            ByteCode::Arg(_, b) => *b,
+            _ => self
+        }
+    }
+}
+
+impl Display for ByteCode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match self {
+            ByteCode::ApplicationFunction(bc, cal, ty) => {
+                write!(f, "{} ({}): {}", cal, bc.iter().join(","), ty)
+            }
+            ByteCode::Int(i) => write!(f, "{}: Int", i),
+            ByteCode::Var(v, bc) => write!(f, "{}: {}", v, bc),
+            ByteCode::Arg(a, bc) => write!(f, "{}: {}", a, bc),
+        }
+    }
 }
 
 impl ByteCode {

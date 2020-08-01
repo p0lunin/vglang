@@ -182,7 +182,6 @@ fn logical_op<F>(left: Expr, right: Expr, f: F) -> Result<Expr, Error>
 where
     F: Fn(Box<Expr>, Box<Expr>) -> ExprKind,
 {
-    dbg!(&left);
     match left.ty.deref() {
         Type::Type => Ok(Expr::new(
             Type::typ(),

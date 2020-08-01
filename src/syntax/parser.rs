@@ -228,7 +228,7 @@ peg::parser! { grammar lang() for str {
             (n, Span::new(s, e))
         }
     rule ident() -> Spanned<String>
-        = s:position!() ident:$(['a'..='z'|'A'..='Z'|'_'] ['a'..='z'|'A'..='Z'|'0'..='9'|'_']*) e:position!() {
+        = s:position!() !"in" ident:$(['a'..='z'|'A'..='Z'|'_'] ['a'..='z'|'A'..='Z'|'0'..='9'|'_'|'\'']*) e:position!() {
             Spanned::new(String::from(ident), Span::new(s, e))
         }
 

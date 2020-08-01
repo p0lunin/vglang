@@ -18,10 +18,7 @@ impl Function {
 
 impl Display for Function {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        self.get_value.fmt(f)?;
-        f.write_str(" -> ")?;
-        self.return_value.fmt(f)?;
-        Ok(())
+        write!(f, "({} -> {})", self.get_value, self.return_value)
     }
 }
 /*

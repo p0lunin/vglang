@@ -1,5 +1,5 @@
 use clap::{App, Arg};
-use fsmcreator::compile_file;
+use fsmcreator::{compile_file, Interpreter, Implementations, eval};
 use std::io;
 use std::io::{stdin, Write};
 /*use z3::ast::Ast;
@@ -45,7 +45,7 @@ fn main() {
     let path_to_std = matches.value_of("std");
     let ctx = {
         path_to_std.and_then(|path_to_std| {
-            let (ctx, impls1) = match compile_file(path_to_std, None) {
+            let ctx = match compile_file(path_to_std, None) {
                 Ok(ctx) => ctx,
                 Err(e) => {
                     println!("{}", e);
@@ -54,6 +54,10 @@ fn main() {
             };
             Some(ctx)
         })
+    };
+    let (ctx, mut impls) = match ctx {
+        Some((c, impls)) => (Some(c), impls),
+        None => (None, Implementations::new()),
     };
     let (ctx, impls2) = match compile_file(path_to_file, ctx.as_ref()) {
         Ok(ctx) => ctx,
@@ -66,13 +70,16 @@ fn main() {
     ctx.objects.iter().for_each(|o| {
         println!("{}\n", o);
     });
-    /*
-    let mut interpreter = Interpreter::from_ir_context(ctx, ir_ctx);
+    
+    let mut f2 = impls2.functions;
+    f2.append(&mut impls.functions);
+    
+    let mut interpreter = Interpreter::new(&f2, &ctx);
 
-    repl(">>", |d| match interpreter.execute_code(&d) {
+    repl(">>", |d| match eval(&mut interpreter, &d) {
         Ok(b) => b.to_string(),
         Err(e) => e,
-    })*/
+    })
 }
 
 fn repl(s: &str, mut f: impl FnMut(String) -> String) {

@@ -4,6 +4,12 @@ pub struct Context<'a, T: 'a> {
     pub parent: Option<&'a Context<'a, T>>,
 }
 
+impl<'a, T: 'a> Context<'a, T> {
+    pub fn new() -> Self {
+        Context { objects: vec![], parent: None }
+    }
+}
+
 impl<'a, T: HasName + 'a> Context<'a, T> {
     pub fn find(&'a self, name: &str) -> Option<&'a T> {
         let this = self.objects.iter().find(|t| t.name() == name);
