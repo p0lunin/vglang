@@ -1,5 +1,4 @@
 use crate::common::{Context, Error, Spanned};
-use crate::interpreter::proof_func;
 use crate::ir::expr::parse_expr;
 use crate::ir::objects::{Arg, FunctionDefinition, FunctionObject, Object, TypeObject};
 use crate::ir::types::{Generic, Type};
@@ -92,7 +91,6 @@ pub fn parse_function(
                 args,
                 body: expr,
             };
-            proof_func(&f, impls.functions.as_slice(), &ctx)?;
             impls.add_function(f);
 
             Ok(Object::FunctionDefinition(func_def))

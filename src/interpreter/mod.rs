@@ -1,7 +1,4 @@
-mod z3_converter;
-
 use crate::common::{Context, Error, HasName};
-use crate::interpreter::z3_converter::{Consts, ProofContext};
 use crate::ir::objects::{Arg, DataVariant, FunctionDefinition, FunctionObject, Object, Var};
 use crate::ir::types::Type;
 use crate::ir::{parse_expr, Expr, ExprKind};
@@ -13,7 +10,6 @@ use std::fmt::{Display, Formatter};
 use std::ops;
 use std::ops::Deref;
 use std::rc::Rc;
-use z3::Solver;
 
 #[derive(Debug)]
 pub struct Interpreter<'a> {
@@ -140,38 +136,4 @@ impl HasName for ByteCode {
             ByteCode::Arg(a, _) => a.name.as_str(),
         }
     }
-}
-
-pub fn proof_func(
-    f: &FunctionObject,
-    objects: &[FunctionObject],
-    objs_ctx: &Context<'_, Object>,
-) -> Result<(), Error> {
-    let body = &f.body;
-    let config = z3::Config::new();
-    let ctx = z3::Context::new(&config);
-    let solver = z3::Solver::new(&ctx);
-    let mut ctx = ProofContext {
-        solver,
-        prefix: f.def.name.clone().inner() + "_",
-        interpreter: Interpreter::new(objects, objs_ctx),
-    };
-    let mut consts = Consts::new();
-
-    f.args
-        .iter()
-        .map(|arg| {
-            ctx.declare_var(
-                ctx.prefix.clone() + arg.name.as_str(),
-                arg.ty.deref(),
-                &mut consts,
-            )
-        })
-        .collect::<Result<_, _>>()?;
-
-    ctx.proof_check(
-        body.clone(),
-        f.def.ftype.clone().get_return_value().deref(),
-        &mut consts,
-    )
 }
