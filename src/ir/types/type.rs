@@ -1,7 +1,8 @@
 use crate::common::Spanned;
-use crate::ir::objects::{DataType, DataVariant};
+use crate::ir::objects::{DataDef, DataType, DataVariant};
 use crate::ir::types::base_types::Function;
 use crate::ir::{Expr, ExprKind};
+use crate::syntax::ast;
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
 use std::rc::Rc;
@@ -12,7 +13,6 @@ pub enum Type {
     Unknown,
     Int,
     Data(Rc<DataType>),
-    DataVariant(Rc<DataVariant>),
     Type,
     Never,
     Generic(Generic),
@@ -23,6 +23,12 @@ pub enum Type {
 #[derive(Debug, PartialEq, Clone)]
 pub struct Generic {
     pub(crate) name: Spanned<String>,
+}
+
+impl Generic {
+    pub fn parse(g: ast::Generic) -> Self {
+        Self { name: g.name }
+    }
 }
 
 impl Display for Generic {
@@ -43,6 +49,7 @@ impl Type {
             (Type::Expr(e), t) => e.ty.is_part_of(t),
             (t, Type::Named(_, ty)) => t.is_part_of(ty),
             (Type::Named(_, t), ty) => t.is_part_of(ty),
+            (Type::Data(d1), Type::Data(d2)) => d1 == d2,
             _ => false,
         }
     }
@@ -90,7 +97,6 @@ impl Display for Type {
             Type::Type => f.write_str("Type"),
             Type::Generic(g) => Display::fmt(g, f),
             Type::Data(g) => Display::fmt(g, f),
-            Type::DataVariant(g) => Display::fmt(g, f),
             Type::Never => f.write_str("Never"),
             Type::Unknown => f.write_str("Unknown"),
             Type::Expr(e) => Display::fmt(e, f),

@@ -1,5 +1,5 @@
 use clap::{App, Arg};
-use fsmcreator::{compile_file, Interpreter, Implementations, eval};
+use fsmcreator::{compile_file, eval, Implementations, Interpreter};
 use std::io;
 use std::io::{stdin, Write};
 /*use z3::ast::Ast;
@@ -70,10 +70,10 @@ fn main() {
     ctx.objects.iter().for_each(|o| {
         println!("{}\n", o);
     });
-    
+
     let mut f2 = impls2.functions;
     f2.append(&mut impls.functions);
-    
+
     let mut interpreter = Interpreter::new(&f2, &ctx);
 
     repl(">>", |d| match eval(&mut interpreter, &d) {

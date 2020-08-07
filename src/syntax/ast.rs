@@ -1,5 +1,5 @@
 use crate::common::{Span, Spanned};
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::ops::Deref;
 
 #[derive(PartialEq, Clone)]
@@ -64,6 +64,7 @@ pub enum Ast {
         then: Box<Token>,
         else_: Box<Token>,
     },
+    CaseExpr(Box<CaseExpr>),
 }
 
 #[derive(Debug, PartialEq)]
@@ -109,23 +110,61 @@ pub struct FunctionBody(pub Token);
 #[derive(Debug, PartialEq, Clone)]
 pub struct EnumDecl {
     pub name: Spanned<String>,
-    pub variants: Vec<Spanned<EnumVariant>>,
+    pub variants: Vec<Spanned<EnumVariant<Token>>>,
     pub generics: Vec<Spanned<Generic>>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct EnumVariant {
+pub struct EnumVariant<T> {
     pub name: Spanned<String>,
-    pub kind: EnumVariantKind,
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub enum EnumVariantKind {
-    Unit,
-    WithData(Vec<Token>),
+    pub datas: Vec<T>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Generic {
     pub name: Spanned<String>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct CaseExpr {
+    pub cond: Token,
+    pub arms: Vec<CaseArm>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct CaseArm {
+    pub pat: Spanned<Pattern>,
+    pub arm: Token,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum Pattern {
+    Otherwise,
+    Ident(String),
+    Variant(Path, Vec<Spanned<Pattern>>),
+    Bind(Spanned<String>, Box<Spanned<Pattern>>),
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum Path {
+    Place(String),
+    Path(String, Box<Path>),
+}
+
+impl Path {
+    pub fn end(&self) -> &str {
+        match self {
+            Path::Path(_, next) => next.end(),
+            Path::Place(s) => s.as_str(),
+        }
+    }
+}
+
+impl Display for Path {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match self {
+            Path::Place(s) => f.write_str(s.as_str()),
+            Path::Path(s, next) => write!(f, "{}.{}", s, next),
+        }
+    }
 }

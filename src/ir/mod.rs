@@ -1,7 +1,7 @@
 mod expr;
 pub mod objects;
+pub mod patmat;
 mod transform;
-//  mod type_check;
 pub mod types;
 
 pub use self::{
@@ -9,21 +9,29 @@ pub use self::{
     transform::{parse_function, parse_tokens},
 };
 
-use crate::ir::objects::FunctionObject;
+use crate::ir::objects::{DataDef, FunctionObject};
+use std::rc::Rc;
 
 #[derive(Debug)]
 pub struct Implementations {
     pub functions: Vec<FunctionObject>,
+    pub data_defs: Vec<Rc<DataDef>>,
 }
 
 impl Implementations {
     pub fn new() -> Self {
-        Implementations { functions: vec![] }
+        Implementations {
+            functions: vec![],
+            data_defs: vec![],
+        }
     }
 }
 
 impl Implementations {
     pub fn add_function(&mut self, f: FunctionObject) {
         self.functions.push(f)
+    }
+    pub fn add_data(&mut self, d: Rc<DataDef>) {
+        self.data_defs.push(d)
     }
 }

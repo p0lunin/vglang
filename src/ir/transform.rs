@@ -1,6 +1,6 @@
 use crate::common::{Context, Error, Spanned};
 use crate::ir::expr::parse_expr;
-use crate::ir::objects::{Arg, FunctionDefinition, FunctionObject, Object, TypeObject};
+use crate::ir::objects::{Arg, DataDef, FunctionDefinition, FunctionObject, Object, TypeObject};
 use crate::ir::types::{Generic, Type};
 use crate::ir::{expr, Implementations};
 use crate::syntax::ast::{FunctionDef, FunctionImpl, TopLevelToken};
@@ -41,7 +41,7 @@ pub fn parse_function(
         Some(Type::typ()),
     )?
     .unwrap() // TODO
-    .convert_to_type()?;
+    .convert_to_type(&ctx)?;
     let func_def = Rc::new(FunctionDefinition {
         name: name.clone(),
         ftype: func_type.clone(),
@@ -156,10 +156,14 @@ pub fn parse_tokens<'a>(
             TopLevelToken::NewLine | TopLevelToken::Comment => {}
             TopLevelToken::FunctionDef(f) => function_defs.push(f),
             TopLevelToken::FunctionImpl(i) => function_impls.push_front(i),
-            TopLevelToken::EnumDecl(e) => unimplemented!(), /*match EnumType::from_ast(e, &ctx, &mut ir_ctx) {
-                                                                Ok(e) => ctx.objects.push(AllObject::Enum(e)),
-                                                                Err(err) => errors.push(err),
-                                                            },*/
+            TopLevelToken::EnumDecl(e) => match DataDef::parse(e, &ctx) {
+                Ok(d) => {
+                    let d = Rc::new(d);
+                    ctx.objects.push(Object::Enum(d.clone()));
+                    impls.add_data(d);
+                }
+                Err(e) => errors.push(e),
+            },
         }
     });
     function_defs.into_iter().for_each(|d| {

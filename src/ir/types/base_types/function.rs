@@ -11,7 +11,7 @@ pub struct Function {
 
 impl Function {
     pub fn is_part_of(&self, other: &Function) -> bool {
-        other.get_value.is_part_of(self.get_value.deref())
+        self.get_value.is_part_of(other.get_value.deref())
             && self.return_value.is_part_of(&other.return_value.deref())
     }
 }

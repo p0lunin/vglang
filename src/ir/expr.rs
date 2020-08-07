@@ -1,8 +1,12 @@
-use crate::common::{Context, Error, Span};
-use crate::ir::objects::{Object, Var};
+use crate::common::{Context, Error, Searchable, SearchableByPath, Span, Spanned};
+use crate::ir::objects::{DataVariant, Object, Var};
+use crate::ir::patmat::check_exhaustive;
 use crate::ir::types::base_types::Function;
 use crate::ir::types::Type;
-use crate::syntax::ast::{Ast, Token};
+use crate::syntax::ast::Ast::CaseExpr;
+use crate::syntax::ast::{Ast, Pattern, Token};
+use crate::{ir, syntax};
+use itertools::Itertools;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
@@ -44,8 +48,10 @@ pub enum ExprKind {
     Le(Box<Expr>, Box<Expr>),
     LeOrEq(Box<Expr>, Box<Expr>),
     Neg(Box<Expr>),
+    Dot(Box<Expr>, Box<Expr>),
     Type(Rc<Type>),
     Ident(String),
+    DataVariant(Rc<DataVariant>),
     Application(Box<Expr>, Box<Expr>),
     Let {
         var: Rc<Var>,
@@ -56,6 +62,10 @@ pub enum ExprKind {
         condition: Box<Expr>,
         then_arm: Box<Expr>,
         else_arm: Box<Expr>,
+    },
+    CaseExpr {
+        cond: Box<Expr>,
+        arms: Vec<(Spanned<ir::patmat::Pattern>, Expr)>,
     },
 }
 
@@ -72,7 +82,7 @@ impl Display for ExprKind {
 }
 
 impl Expr {
-    pub fn convert_to_type(self) -> Result<Rc<Type>, Error> {
+    pub fn convert_to_type(self, ctx: &Context<'_, Object>) -> Result<Rc<Type>, Error> {
         match self.kind {
             ExprKind::Type(t) => Ok(t),
             ExprKind::Int(_) => Ok(Rc::new(Type::Expr(self))),
@@ -90,7 +100,11 @@ impl Expr {
             ExprKind::Le(_, _) => Ok(Rc::new(Type::Expr(self))),
             ExprKind::LeOrEq(_, _) => Ok(Rc::new(Type::Expr(self))),
             ExprKind::Neg(_) => Ok(Rc::new(Type::Expr(self))),
-            ExprKind::Ident(_) => Ok(Rc::new(Type::Expr(self))),
+            ExprKind::Ident(i) => match ctx.find(i.as_str()).unwrap() {
+                Object::Type(t) => Ok(t.def.clone()),
+                Object::Enum(e) => Ok(Rc::new(Type::Data(e.ty.clone()))),
+                _ => unimplemented!(),
+            },
             ExprKind::Application(_, _) => Ok(Rc::new(Type::Expr(self))),
             ExprKind::Let {
                 var: _,
@@ -102,6 +116,9 @@ impl Expr {
                 then_arm: _,
                 else_arm: _,
             } => Ok(Rc::new(Type::Expr(self))),
+            ExprKind::CaseExpr { cond: _, arms: _ } => Ok(Rc::new(Type::Expr(self))),
+            ExprKind::Dot(_, _) => Ok(Rc::new(Type::Expr(self))),
+            ExprKind::DataVariant(_) => Ok(Rc::new(Type::Expr(self))),
         }
     }
 }
@@ -176,6 +193,24 @@ impl Expr {
     pub fn le_or_eq(self, other: Expr) -> Result<Self, Error> {
         logical_op(self, other, ExprKind::LeOrEq)
     }
+    pub fn dot(self, name: String, ctx: &Context<'_, Object>, span: Span) -> Result<Self, Error> {
+        match self.kind {
+            ExprKind::Ident(i) => {
+                let o = ctx.find(i.as_str());
+                match o {
+                    Some(o) => match o {
+                        Object::Enum(e) => {
+                            let var = e.get_field(&name).ok_or_else(|| unimplemented!())?;
+                            Ok(Expr::new(var.get_type(), span, ExprKind::DataVariant(var)))
+                        }
+                        _ => unimplemented!(),
+                    },
+                    None => unreachable!(),
+                }
+            }
+            _ => unimplemented!(),
+        }
+    }
 }
 
 fn logical_op<F>(left: Expr, right: Expr, f: F) -> Result<Expr, Error>
@@ -242,7 +277,7 @@ fn check_type(e: Expr, expected: Option<Rc<Type>>) -> Result<Option<Expr>, Error
 pub fn parse_type(token: &Token, ctx: &Context<'_, Object>) -> Result<Rc<Type>, Error> {
     parse_expr(token, ctx, &mut HashMap::new(), Some(Type::typ()))
         .and_then(|e| e.ok_or_else(|| Error::cannot_infer_type(token.span)))
-        .and_then(|e| e.convert_to_type())
+        .and_then(|e| e.convert_to_type(ctx))
 }
 
 pub fn parse_expr(
@@ -460,7 +495,7 @@ pub fn parse_expr(
             let exp = Some(Type::typ());
             let left = parse_expr(l, ctx, g, exp.clone())?
                 .ok_or_else(|| Error::cannot_infer_type(token.span))?
-                .convert_to_type()?;
+                .convert_to_type(ctx)?;
             let left_types = left.types_in_scope();
             let new_ctx = Context {
                 objects: left_types
@@ -476,13 +511,15 @@ pub fn parse_expr(
                 token.span,
                 ExprKind::Type(Rc::new(Type::Function(Function {
                     get_value: left,
-                    return_value: right.convert_to_type()?,
+                    return_value: right.convert_to_type(ctx)?,
                 }))),
             );
             check_type(expr, expected)
         }
         Ast::Named(name, ty) => {
-            let ty = parse_expr(ty, ctx, g, None)?.unwrap().convert_to_type()?; // TODO
+            let ty = parse_expr(ty, ctx, g, None)?
+                .unwrap()
+                .convert_to_type(ctx)?; // TODO
             Ok(Some(Expr::new(
                 Type::typ(),
                 token.span,
@@ -524,7 +561,13 @@ pub fn parse_expr(
                 None => unimplemented!(),
             }
         }
-        Ast::Dot(_, _) => unimplemented!(),
+        Ast::Dot(l, r) => match &r.ast {
+            Ast::Ident(i) => {
+                let left = parse_expr(l, ctx, g, None)?.unwrap();
+                left.dot(i.clone(), ctx, token.span).map(Some)
+            }
+            _ => unimplemented!(),
+        },
         Ast::Let { var, assign, expr } => {
             let ex = parse_expr(assign.as_ref(), ctx, g, None)?;
             match ex {
@@ -596,5 +639,82 @@ pub fn parse_expr(
             then: _,
             else_: _,
         } => unimplemented!(),
+        Ast::CaseExpr(e) => {
+            let syntax::ast::CaseExpr { cond, arms } = e.as_ref();
+            let cond = parse_expr(cond, ctx, g, None)?
+                .ok_or_else(|| Error::cannot_infer_type(token.span))?;
+            let arms: Vec<(Spanned<ir::patmat::Pattern>, Expr)> = arms
+                .iter()
+                .map(|arm| {
+                    let scope = create_scope(&arm.pat, ctx, cond.ty.clone())?;
+                    Ok((
+                        ir::patmat::Pattern::parse(arm.pat.clone()),
+                        parse_expr(&arm.arm, &scope, g, expected.clone())?
+                            .ok_or_else(|| Error::cannot_infer_type(token.span))?,
+                    ))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let ty = arms
+                .first()
+                .map(|arm| arm.1.ty.clone())
+                .unwrap_or_else(|| Rc::new(Type::Never));
+            arms.iter()
+                .map(|arm| match arm.1.ty == ty {
+                    true => Ok(()),
+                    false => Err(Error::custom(
+                        token.span,
+                        format!("Expected type {} but found {}", ty, arm.1.ty),
+                    )),
+                })
+                .collect::<Result<Vec<()>, _>>()?;
+            Ok(Some(Expr::new(
+                ty,
+                token.span,
+                ExprKind::CaseExpr {
+                    cond: Box::new(cond),
+                    arms,
+                },
+            )))
+        }
     }
+}
+
+fn create_scope<'a>(
+    pattern: &'a Spanned<Pattern>,
+    top: &'a Context<'a, Object>,
+    pattern_type: Rc<Type>,
+) -> Result<Context<'a, Object>, Error> {
+    let mut ctx = Context {
+        objects: vec![],
+        parent: Some(top),
+    };
+    match pattern.deref() {
+        Pattern::Otherwise => {}
+        Pattern::Bind(s, b) => {
+            ctx.objects.push(Object::Var(Rc::new(Var {
+                name: (**s).clone(),
+                ty: pattern_type.clone(),
+            })));
+            ctx.objects
+                .append(&mut create_scope(b.as_ref(), &ctx, pattern_type)?.objects);
+        }
+        Pattern::Variant(path, pats) => match top.find_by_path(path) {
+            Some(Object::EnumVariant(v)) => match v.data.len() == pats.len() {
+                true => pats.iter().zip(v.data.iter()).for_each(|(pat, ty)| {
+                    match create_scope(pat, &ctx, ty.clone()) {
+                        Ok(mut res) => ctx.objects.append(&mut res.objects),
+                        _ => {}
+                    }
+                }),
+                false => return Err(unimplemented!()),
+            },
+            Some(_) => return Err(Error::custom(unimplemented!(), "")),
+            None => return Err(Error::custom(pattern.span, format!("{} not found", path))),
+        },
+        Pattern::Ident(s) => ctx.objects.push(Object::Var(Rc::new(Var {
+            name: (*s).clone(),
+            ty: pattern_type.clone(),
+        }))),
+    };
+    Ok(ctx)
 }

@@ -3,23 +3,22 @@ pub mod interpreter;
 mod ir;
 mod syntax;
 
-pub use interpreter::Interpreter;
 pub use crate::ir::Implementations;
+pub use interpreter::Interpreter;
 
 use crate::common::{peg_error_to_showed, Context, Error};
+use crate::interpreter::ByteCode;
 use crate::ir::objects::Object;
-use crate::ir::{parse_tokens};
+use crate::ir::parse_tokens;
 use crate::syntax::{parse_text, parse_token};
 use itertools::Itertools;
 use std::fs::File;
 use std::io::Read;
-use crate::interpreter::ByteCode;
 
 pub fn compile_file<'a>(
     path_to_file: &str,
     top: Option<&'a Context<'a, Object>>,
-) -> Result<(Context<'a, Object>, Implementations), String> 
-{
+) -> Result<(Context<'a, Object>, Implementations), String> {
     let mut file = match File::open(path_to_file) {
         Ok(f) => f,
         Err(e) => {
