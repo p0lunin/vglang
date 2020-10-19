@@ -1,9 +1,5 @@
 # VG lang
-Functional programming language.
-Plans:
-1. Functional paradigm.
-2. Dependent types.
-3. Automatic no-GC memory management.
+Unsuccessful attempt to implement functional programming language.
 
 How to run repl:
 ```
