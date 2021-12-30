@@ -34,10 +34,10 @@ impl<T> IntoIterator for VecType<T> {
 }
 
 impl<T> VecType<T> {
-    pub fn one(t: T) -> Self {
+    pub fn _one(t: T) -> Self {
         Self(vec![t])
     }
-    pub fn inner(self) -> Vec<T> {
+    pub fn _inner(self) -> Vec<T> {
         self.0
     }
 }

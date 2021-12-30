@@ -1,6 +1,6 @@
 use crate::common::{HasName, Searchable};
 use crate::ir::objects::{
-    Arg, DataDef, DataType, DataVariant, FunctionDefinition, TypeObject, Var,
+    Arg, DataDef, DataVariant, FunctionDefinition, TypeObject, Var,
 };
 use crate::ir::types::Type;
 use std::fmt::{Display, Formatter};
@@ -35,7 +35,7 @@ impl Object {
     pub fn get_type(&self) -> Rc<Type> {
         match self {
             Object::FunctionDefinition(f) => f.ftype.clone(),
-            Object::Type(t) => Type::typ(),
+            Object::Type(_t) => Type::typ(),
             Object::Arg(a) => a.ty.clone(),
             Object::Enum(e) => Rc::new(Type::Data(e.ty.clone())),
             Object::EnumVariant(e) => Rc::new(Type::Data(e.dty.clone())),

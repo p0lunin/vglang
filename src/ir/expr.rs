@@ -1,12 +1,9 @@
 use crate::common::{Context, Error, Searchable, SearchableByPath, Span, Spanned};
 use crate::ir::objects::{DataVariant, Object, Var};
-use crate::ir::patmat::check_exhaustive;
 use crate::ir::types::base_types::Function;
 use crate::ir::types::Type;
-use crate::syntax::ast::Ast::CaseExpr;
 use crate::syntax::ast::{Ast, Pattern, Token};
 use crate::{ir, syntax};
-use itertools::Itertools;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
@@ -243,8 +240,8 @@ where
     let right = parse_expr(r, ctx, g, None)?;
     match (left, right) {
         (Some(l), Some(r)) => f(l, r).map(Some),
-        (Some(l), None) => unimplemented!(),
-        (None, Some(r)) => unimplemented!(),
+        (Some(_l), None) => unimplemented!(),
+        (None, Some(_r)) => unimplemented!(),
         (None, None) => {
             let left = parse_expr(l, ctx, g, expected.clone())?
                 .ok_or_else(|| Error::cannot_infer_type(span))?;
@@ -610,7 +607,8 @@ pub fn parse_expr(
                                     name: (**var).clone(),
                                     ty: inferred.clone(),
                                 });
-                                match parse_expr(assign.as_ref(), ctx, g, Some(inferred.clone()))? {
+                                let inferred_clone = inferred.clone();
+                                match parse_expr(assign.as_ref(), ctx, g, Some(inferred_clone))? {
                                     Some(assigned) => {
                                         let expr = Expr::new(
                                             expr_.ty.clone(),
@@ -702,13 +700,17 @@ fn create_scope<'a>(
             Some(Object::EnumVariant(v)) => match v.data.len() == pats.len() {
                 true => pats.iter().zip(v.data.iter()).for_each(|(pat, ty)| {
                     match create_scope(pat, &ctx, ty.clone()) {
-                        Ok(mut res) => ctx.objects.append(&mut res.objects),
+                        Ok(mut res) => {
+                            // https://github.com/rust-lang/rust/issues/59159
+                            let objs = &mut res.objects;
+                            ctx.objects.append(objs)
+                        },
                         _ => {}
                     }
                 }),
-                false => return Err(unimplemented!()),
+                false => unimplemented!(),
             },
-            Some(_) => return Err(Error::custom(unimplemented!(), "")),
+            Some(_) => unimplemented!(),
             None => return Err(Error::custom(pattern.span, format!("{} not found", path))),
         },
         Pattern::Ident(s) => ctx.objects.push(Object::Var(Rc::new(Var {

@@ -1,7 +1,7 @@
 use crate::common::Spanned;
-use crate::ir::objects::{DataDef, DataType, DataVariant};
+use crate::ir::objects::{DataType};
 use crate::ir::types::base_types::Function;
-use crate::ir::{Expr, ExprKind};
+use crate::ir::{Expr};
 use crate::syntax::ast;
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;

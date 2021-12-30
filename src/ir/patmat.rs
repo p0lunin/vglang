@@ -29,6 +29,6 @@ impl Pattern {
     }
 }
 
-pub fn check_exhaustive(patterns: &[Pattern]) -> bool {
+pub fn _check_exhaustive(_patterns: &[Pattern]) -> bool {
     true
 }

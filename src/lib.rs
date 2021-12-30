@@ -6,7 +6,7 @@ mod syntax;
 pub use crate::ir::Implementations;
 pub use interpreter::Interpreter;
 
-use crate::common::{peg_error_to_showed, Context, Error};
+use crate::common::{peg_error_to_showed, Context};
 use crate::interpreter::ByteCode;
 use crate::ir::objects::Object;
 use crate::ir::parse_tokens;

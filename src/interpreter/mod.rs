@@ -5,14 +5,10 @@ use crate::ir::objects::{
 use crate::ir::patmat::Pattern;
 use crate::ir::types::Type;
 use crate::ir::{parse_expr, Expr, ExprKind};
-use crate::peg_error_to_showed;
 use crate::syntax::ast::Token;
-use crate::syntax::parse_token;
 use itertools::Itertools;
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
-use std::ops;
 use std::ops::Deref;
 use std::rc::Rc;
 
@@ -46,7 +42,7 @@ impl Interpreter<'_> {
                         Object::FunctionDefinition(def) => {
                             self.eval_func(vec![], Callable::Func(def.clone()), def.ftype.clone())
                         }
-                        Object::Enum(e) => unimplemented!(),
+                        Object::Enum(_e) => unimplemented!(),
                         Object::EnumVariant(_) => unimplemented!(),
                         Object::Arg(_) => unimplemented!(),
                         Object::Var(_) => unimplemented!(),
@@ -62,7 +58,7 @@ impl Interpreter<'_> {
                             args.push(right);
                             let ty = match ty.deref() {
                                 Type::Function(f) => f.return_value.clone(),
-                                otherwise => ty,
+                                _otherwise => ty,
                             };
                             self.eval_func(args, func, ty)
                         }
@@ -168,13 +164,17 @@ impl Interpreter<'_> {
             }
             Pattern::Variant(path, pats) => match self.ctx.find_by_path(path) {
                 Some(Object::EnumVariant(_)) => {
-                    let (v, datas) = match obj.clone().inner() {
+                    let (_v, datas) = match obj.clone().inner() {
                         ByteCode::DataVariant(v, datas) => (v, datas),
                         _ => unreachable!(),
                     };
                     pats.iter().zip(datas.iter()).for_each(|(pat, dat)| {
                         let mut res = self.create_scope_for_pattern(pat, dat.clone(), &scope);
-                        scope.objects.append(&mut res.objects);
+                        {
+                            // https://github.com/rust-lang/rust/issues/59159
+                            let objs = &mut res.objects;
+                            scope.objects.append(objs);
+                        }
                     })
                 }
                 _ => unreachable!(),
@@ -252,7 +252,7 @@ impl ByteCode {
             ByteCode::Var(v, _) => v.ty.clone(),
             ByteCode::Arg(a, _) => a.ty.clone(),
             ByteCode::DataVariant(v, _) => Rc::new(Type::Data(v.dty.clone())),
-            ByteCode::DataType(d) => Rc::new(Type::Type),
+            ByteCode::DataType(_d) => Rc::new(Type::Type),
         }
     }
 

@@ -141,7 +141,7 @@ pub fn parse_tokens<'a>(
     let mut function_defs = vec![];
     let mut function_impls = VecDeque::new();
     tokens.into_iter().for_each(|token| {
-        let span = token.span;
+        let _span = token.span;
         match token.inner() {
             TopLevelToken::Type(ty) => {
                 let name = ty.0.clone();
