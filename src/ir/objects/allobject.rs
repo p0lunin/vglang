@@ -1,7 +1,5 @@
 use crate::common::{HasName, Searchable};
-use crate::ir::objects::{
-    Arg, DataDef, DataVariant, FunctionDefinition, TypeObject, Var,
-};
+use crate::ir::objects::{Arg, DataDef, DataVariant, FunctionDefinition, TypeObject, Var};
 use crate::ir::types::Type;
 use std::fmt::{Display, Formatter};
 use std::rc::Rc;
@@ -18,10 +16,7 @@ pub enum Object {
 
 impl Object {
     pub fn var(name: String, ty: Rc<Type>) -> Self {
-        Object::Var(Rc::new(Var {
-            name,
-            ty,
-        }))
+        Object::Var(Rc::new(Var { name, ty }))
     }
 }
 

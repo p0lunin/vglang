@@ -682,6 +682,7 @@ pub fn parse_expr(
     }
 }
 
+// Function creates scope of variables for the pattern recursively.
 fn create_scope<'a>(
     pattern: &'a Spanned<Pattern>,
     top: &'a Context<'a, Object>,
@@ -707,19 +708,26 @@ fn create_scope_objects<'a>(
             objects.append(&mut create_scope_objects(b.as_ref(), &top, pattern_type)?);
         }
         Pattern::Variant(path, pats) => match top.find_by_path(path) {
-            Some(Object::EnumVariant(v)) => match v.data.len() == pats.len() {
-                true => pats.iter().zip(v.data.iter()).for_each(|(pat, ty)| {
-                    match create_scope_objects(pat, &top, ty.clone()) {
-                        Ok(mut res) => {
-                            // https://github.com/rust-lang/rust/issues/59159
-                            let objs = &mut res;
-                            objects.append(objs)
-                        },
-                        _ => {}
+            Some(Object::EnumVariant(v)) => {
+                match v.data.len() == pats.len() {
+                    true => pats.iter().zip(v.data.iter()).for_each(|(pat, ty)| {
+                        match create_scope_objects(pat, &top, ty.clone()) {
+                            Ok(mut res) => {
+                                // https://github.com/rust-lang/rust/issues/59159
+                                let objs = &mut res;
+                                objects.append(objs)
+                            }
+                            _ => {}
+                        }
+                    }),
+                    false => {
+                        return Err(Error::custom(
+                            pattern.span,
+                            format!("Expected {} patterns, found {}", v.data.len(), pats.len()),
+                        ))
                     }
-                }),
-                false => unimplemented!(),
-            },
+                }
+            }
             Some(_) => unimplemented!(),
             None => return Err(Error::custom(pattern.span, format!("{} not found", path))),
         },

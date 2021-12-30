@@ -1,7 +1,7 @@
+use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display, Formatter};
 use std::ops::{Add, Deref, DerefMut, Neg, Sub};
-use std::borrow::Borrow;
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub struct Span {

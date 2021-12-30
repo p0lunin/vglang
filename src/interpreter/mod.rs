@@ -42,9 +42,7 @@ impl Interpreter<'_> {
                         Object::FunctionDefinition(def) => {
                             self.eval_func(vec![], Callable::Func(def.clone()), def.ftype.clone())
                         }
-                        Object::Enum(e) => {
-                            Ok(ByteCode::DataType(e))
-                        },
+                        Object::Enum(e) => Ok(ByteCode::DataType(e)),
                         Object::EnumVariant(_) => unimplemented!(),
                         Object::Arg(_) => unimplemented!(),
                         Object::Var(_) => unimplemented!(),

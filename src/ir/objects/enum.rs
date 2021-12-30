@@ -1,8 +1,8 @@
 use crate::common::{Context, Error};
 use crate::ir::objects::Object;
+use crate::ir::parse_expr;
 use crate::ir::types::base_types::Function;
 use crate::ir::types::{Generic, Type};
-use crate::ir::{parse_expr};
 use crate::syntax::ast::{EnumDecl, EnumVariant, Token};
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
