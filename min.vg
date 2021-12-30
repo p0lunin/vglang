@@ -21,6 +21,9 @@ let' x = let foo = x + 1 in foo + 1
 case': Int -> Int
 case' x = case x of _ => x ?>
 
+generics<a>: a -> a
+generics x = x
+
 /*
 trait Foo a where
     bar: a -> a
