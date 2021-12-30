@@ -38,6 +38,33 @@ impl Display for Generic {
 }
 
 impl Type {
+    pub fn update_set_generic_func(self: Rc<Type>, g: &Generic, ty: &Rc<Type>) -> Rc<Type> {
+        match self.as_ref() {
+            Type::Generic(gen) => {
+                if gen == g {
+                    ty.clone()
+                } else {
+                    self
+                }
+            }
+            Type::Function(f) => {
+                let get_value = f.get_value.clone().update_set_generic_func(g, ty);
+                let return_value = f.return_value.clone().update_set_generic_func(g, ty);
+                if get_value != f.get_value || f.return_value != return_value {
+                    Rc::new(Type::Function(Function {
+                        get_value,
+                        return_value,
+                    }))
+                } else {
+                    self
+                }
+            }
+            _ => self
+        }
+    }
+}
+
+impl Type {
     pub fn is_part_of(&self, other: &Type) -> bool {
         match (self, other) {
             (_, Type::Never) => true,
