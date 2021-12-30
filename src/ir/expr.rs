@@ -279,9 +279,13 @@ pub fn parse_type(token: &Token, ctx: &Context<'_, Object>) -> Result<Rc<Type>, 
 
 /// Parse token tree into expression.
 ///
-/// Returns `Some` if ...
+/// Returns `Some` if:
+/// 1. `expected` is `None` and can infer type.
+/// 2. `expected` is `Some(T)` and `typeof(expr) == T`.
 ///
-/// Returns `None` if ...
+/// Returns `None` if:
+/// 1. `expected` is `None` and cannot infer type.
+/// 2. `expected` is `Some(T)` and `typeof(expr) != T`.
 pub fn parse_expr(
     token: &Token,
     ctx: &Context<'_, Object>,
@@ -571,71 +575,15 @@ pub fn parse_expr(
             _ => unimplemented!(),
         },
         Ast::Let { var, assign, expr } => {
-            let ex = parse_expr(assign.as_ref(), ctx, g, None)?;
-            match ex {
-                Some(assigned) => {
-                    let var = Rc::new(Var {
-                        name: (**var).clone(),
-                        ty: assigned.ty.clone(),
-                    });
-                    let ctx = Context {
-                        objects: vec![Object::Var(var.clone())],
-                        parent: Some(ctx),
-                    };
-                    let expr_ = parse_expr(expr.as_ref(), &ctx, g, expected.clone())?;
-                    match expr_ {
-                        Some(e) => {
-                            let expr = Expr::new(
-                                e.ty.clone(),
-                                token.span,
-                                ExprKind::Let {
-                                    var,
-                                    assign: Box::new(assigned),
-                                    expr: Box::new(e),
-                                },
-                            );
-                            check_type(expr, expected)
-                        }
-                        None => Err(Error::cannot_infer_type(expr.span)),
-                    }
-                }
-                None => match g.get(var.as_str()) {
-                    Some(Some(_)) | None => {
-                        g.insert(var.to_string(), None);
-                        let expr_ = match parse_expr(expr.as_ref(), &ctx, g, expected.clone())? {
-                            Some(e) => e,
-                            None => Err(Error::cannot_infer_type(expr.span))?,
-                        };
-                        match g.get(var.as_str()) {
-                            Some(Some(inferred)) => {
-                                let var = Rc::new(Var {
-                                    name: (**var).clone(),
-                                    ty: inferred.clone(),
-                                });
-                                let inferred_clone = inferred.clone();
-                                match parse_expr(assign.as_ref(), ctx, g, Some(inferred_clone))? {
-                                    Some(assigned) => {
-                                        let expr = Expr::new(
-                                            expr_.ty.clone(),
-                                            token.span,
-                                            ExprKind::Let {
-                                                var,
-                                                assign: Box::new(assigned),
-                                                expr: Box::new(expr_),
-                                            },
-                                        );
-                                        check_type(expr, expected)
-                                    }
-                                    None => Err(Error::cannot_infer_type(assign.span)),
-                                }
-                            }
-                            Some(None) => Err(Error::cannot_infer_type(assign.span)),
-                            None => unreachable!(),
-                        }
-                    }
-                    Some(None) => Err(Error::cannot_infer_type(var.span)),
-                },
-            }
+            parse_let_expr(
+                var,
+                assign,
+                expr,
+                token.span,
+                ctx,
+                g,
+                expected,
+            )
         }
         Ast::IfThenElse {
             if_: _,
@@ -644,8 +592,11 @@ pub fn parse_expr(
         } => unimplemented!(),
         Ast::CaseExpr(e) => {
             let syntax::ast::CaseExpr { cond, arms } = e.as_ref();
+
             let cond = parse_expr(cond, ctx, g, None)?
+                // TODO: we can infer type using match patterns.
                 .ok_or_else(|| Error::cannot_infer_type(token.span))?;
+
             let arms: Vec<(Spanned<ir::patmat::Pattern>, Expr)> = arms
                 .iter()
                 .map(|arm| {
@@ -679,6 +630,86 @@ pub fn parse_expr(
                 },
             )))
         }
+    }
+}
+
+fn parse_let_expr(
+    var: &Spanned<String>,
+    assign: &Token,
+    expr_token: &Token,
+    token_span: Span,
+    ctx: &Context<'_, Object>,
+    g: &mut HashMap<String, Option<Rc<Type>>>,
+    expected_type: Option<Rc<Type>>,
+) -> Result<Option<Expr>, Error> {
+    let ex = parse_expr(assign, ctx, g, None)?;
+    match ex {
+        // if `ex` is Some, it means `ex` have some inferred type.
+        Some(assign_expr) => {
+            let var = Rc::new(Var {
+                name: var.as_ref().clone(),
+                ty: assign_expr.ty.clone(),
+            });
+            let ctx = Context {
+                objects: vec![Object::Var(var.clone())],
+                parent: Some(ctx),
+            };
+            let expr = parse_expr(expr_token, &ctx, g, expected_type.clone())?;
+            match expr {
+                Some(e) => {
+                    let expr = Expr::new(
+                        e.ty.clone(),
+                        token_span,
+                        ExprKind::Let {
+                            var,
+                            assign: Box::new(assign_expr),
+                            expr: Box::new(e),
+                        },
+                    );
+                    check_type(expr, expected_type)
+                }
+                None => Err(Error::cannot_infer_type(expr_token.span)),
+            }
+        }
+        None => match g.get(var.as_str()) {
+            Some(Some(_)) | None => {
+                // If we cannot infer type of var, let's try to parse `in` expressions,
+                // and if `g` contains inferred type, it means we can infer it, otherwise
+                // we cannot infer variable type.
+                g.insert(var.to_string(), None);
+                let expr = match parse_expr(expr_token, &ctx, g, expected_type.clone())? {
+                    Some(e) => e,
+                    None => Err(Error::cannot_infer_type(expr_token.span))?,
+                };
+                match g.get(var.as_str()) {
+                    Some(Some(inferred)) => {
+                        let var = Rc::new(Var {
+                            name: var.as_ref().clone(),
+                            ty: inferred.clone(),
+                        });
+                        let inferred_clone = inferred.clone();
+                        match parse_expr(assign, ctx, g, Some(inferred_clone))? {
+                            Some(assigned) => {
+                                let expr = Expr::new(
+                                    expr.ty.clone(),
+                                    token_span,
+                                    ExprKind::Let {
+                                        var,
+                                        assign: Box::new(assigned),
+                                        expr: Box::new(expr),
+                                    },
+                                );
+                                check_type(expr, expected_type)
+                            }
+                            None => Err(Error::cannot_infer_type(assign.span)),
+                        }
+                    }
+                    Some(None) => Err(Error::cannot_infer_type(assign.span)),
+                    None => unreachable!(),
+                }
+            }
+            Some(None) => Err(Error::cannot_infer_type(var.span)),
+        },
     }
 }
 
