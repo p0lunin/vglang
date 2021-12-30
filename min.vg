@@ -1,0 +1,31 @@
+data Foo = A | B Int
+/*| C { a: Int, b: Int }*/
+
+caseFoo: Foo -> Int
+caseFoo x = case x of
+    Foo.A => 1
+    Foo.B v => v ?>
+
+makeA: Foo
+makeA = Foo.A
+
+add1: Int -> Int
+add1 x = x + 1
+
+call: Int -> (Int -> Int -> Int) -> Int
+call x f = x `f` 1
+
+let': Int -> Int
+let' x = let foo = x + 1 in foo + 1
+
+case': Int -> Int
+case' x = case x of _ => x ?>
+
+/*
+trait Foo a where
+    bar: a -> a
+
+instance Foo Int where
+    bar: Int -> Int
+    bar x = x
+*/

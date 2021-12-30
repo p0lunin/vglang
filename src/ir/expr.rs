@@ -277,6 +277,11 @@ pub fn parse_type(token: &Token, ctx: &Context<'_, Object>) -> Result<Rc<Type>, 
         .and_then(|e| e.convert_to_type(ctx))
 }
 
+/// Parse token tree into expression.
+///
+/// Returns `Some` if ...
+///
+/// Returns `None` if ...
 pub fn parse_expr(
     token: &Token,
     ctx: &Context<'_, Object>,
@@ -682,28 +687,33 @@ fn create_scope<'a>(
     top: &'a Context<'a, Object>,
     pattern_type: Rc<Type>,
 ) -> Result<Context<'a, Object>, Error> {
-    let mut ctx = Context {
-        objects: vec![],
+    let ctx = Context {
+        objects: create_scope_objects(pattern, top, pattern_type)?,
         parent: Some(top),
     };
+    Ok(ctx)
+}
+
+fn create_scope_objects<'a>(
+    pattern: &'a Spanned<Pattern>,
+    top: &'a Context<'a, Object>,
+    pattern_type: Rc<Type>,
+) -> Result<Vec<Object>, Error> {
+    let mut objects = vec![];
     match pattern.deref() {
         Pattern::Otherwise => {}
         Pattern::Bind(s, b) => {
-            ctx.objects.push(Object::Var(Rc::new(Var {
-                name: (**s).clone(),
-                ty: pattern_type.clone(),
-            })));
-            ctx.objects
-                .append(&mut create_scope(b.as_ref(), &ctx, pattern_type)?.objects);
+            objects.push(Object::var(s.as_ref().clone(), pattern_type.clone()));
+            objects.append(&mut create_scope_objects(b.as_ref(), &top, pattern_type)?);
         }
         Pattern::Variant(path, pats) => match top.find_by_path(path) {
             Some(Object::EnumVariant(v)) => match v.data.len() == pats.len() {
                 true => pats.iter().zip(v.data.iter()).for_each(|(pat, ty)| {
-                    match create_scope(pat, &ctx, ty.clone()) {
+                    match create_scope_objects(pat, &top, ty.clone()) {
                         Ok(mut res) => {
                             // https://github.com/rust-lang/rust/issues/59159
-                            let objs = &mut res.objects;
-                            ctx.objects.append(objs)
+                            let objs = &mut res;
+                            objects.append(objs)
                         },
                         _ => {}
                     }
@@ -713,10 +723,7 @@ fn create_scope<'a>(
             Some(_) => unimplemented!(),
             None => return Err(Error::custom(pattern.span, format!("{} not found", path))),
         },
-        Pattern::Ident(s) => ctx.objects.push(Object::Var(Rc::new(Var {
-            name: (*s).clone(),
-            ty: pattern_type.clone(),
-        }))),
+        Pattern::Ident(s) => objects.push(Object::var(s.clone(), pattern_type.clone())),
     };
-    Ok(ctx)
+    Ok(objects)
 }

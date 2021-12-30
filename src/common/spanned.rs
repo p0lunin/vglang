@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display, Formatter};
 use std::ops::{Add, Deref, DerefMut, Neg, Sub};
+use std::borrow::Borrow;
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub struct Span {
@@ -43,6 +44,9 @@ impl<T> Spanned<T> {
             span: self.span,
         }
     }
+    pub fn as_ref(&self) -> &T {
+        &self.val
+    }
 }
 
 impl<T: Debug> Debug for Spanned<T> {
@@ -80,6 +84,12 @@ impl<T: Ord> Ord for Spanned<T> {
 impl<T: Clone> Clone for Spanned<T> {
     fn clone(&self) -> Self {
         Spanned::new(self.val.clone(), self.span)
+    }
+}
+
+impl<T> Borrow<T> for Spanned<T> {
+    fn borrow(&self) -> &T {
+        &self.val
     }
 }
 

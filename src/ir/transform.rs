@@ -140,6 +140,7 @@ pub fn parse_tokens<'a>(
     };
     let mut function_defs = vec![];
     let mut function_impls = VecDeque::new();
+
     tokens.into_iter().for_each(|token| {
         let _span = token.span;
         match token.inner() {
@@ -166,6 +167,7 @@ pub fn parse_tokens<'a>(
             },
         }
     });
+
     function_defs.into_iter().for_each(|d| {
         let (idx, _) = match function_impls.iter().find_position(|i| i.0 == d.name) {
             Some(d) => d,

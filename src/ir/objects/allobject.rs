@@ -16,6 +16,15 @@ pub enum Object {
     Type(Rc<TypeObject>),
 }
 
+impl Object {
+    pub fn var(name: String, ty: Rc<Type>) -> Self {
+        Object::Var(Rc::new(Var {
+            name,
+            ty,
+        }))
+    }
+}
+
 impl Searchable for Object {
     type Item = Self;
 
