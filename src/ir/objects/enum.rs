@@ -1,5 +1,5 @@
 use crate::common::{Context, Error};
-use crate::ir::objects::Object;
+use crate::ir::objects::{Object, TypeObject};
 use crate::ir::parse_expr;
 use crate::ir::types::base_types::Function;
 use crate::ir::types::{Generic, Type};
@@ -12,6 +12,25 @@ use std::rc::Rc;
 pub struct DataType {
     pub name: String,
     pub generics: Vec<Rc<Type>>,
+}
+
+impl DataType {
+    pub fn new(name: String, generics: Vec<Rc<Type>>) -> Self {
+        DataType { name, generics }
+    }
+    pub fn ty(self: &Rc<Self>) -> Rc<Type> {
+        data_ty(self.clone(), &self.generics)
+    }
+}
+
+fn data_ty(ty: Rc<DataType>, generics: &[Rc<Type>]) -> Rc<Type> {
+    match generics {
+        [] => Rc::new(Type::Data(ty)),
+        [x, xs @ ..] => Rc::new(Type::Function(Function {
+            get_value: x.clone(),
+            return_value: data_ty(ty, xs),
+        })),
+    }
 }
 
 impl Display for DataType {
@@ -52,16 +71,36 @@ impl DataDef {
                 .map(|g| Rc::new(Type::Generic(Generic::parse(g.inner()))))
                 .collect(),
         });
+        let ctx = Context {
+            objects: ty
+                .generics
+                .iter()
+                .map(|ty| {
+                    let name = match ty.as_ref() {
+                        Type::Generic(g) => &g.name,
+                        _ => unreachable!(),
+                    };
+                    Object::Type(Rc::new(TypeObject {
+                        name: name.as_str().to_string(),
+                        def: Rc::new(Type::Generic(Generic { name: name.clone() })),
+                    }))
+                })
+                .collect(),
+            parent: Some(ctx),
+        };
         Ok(Self {
             ty: ty.clone(),
             variants: variants
                 .into_iter()
-                .map(|v| DataVariant::parse(v.inner(), ty.clone(), ctx).map(Rc::new))
+                .map(|v| DataVariant::parse(v.inner(), ty.clone(), &ctx).map(Rc::new))
                 .collect::<Result<Vec<_>, _>>()?,
         })
     }
     pub fn get_field(&self, name: &str) -> Option<Rc<DataVariant>> {
         self.variants.iter().find(|v| v.name == name).map(Rc::clone)
+    }
+    pub fn ty(&self) -> Rc<Type> {
+        self.ty.ty()
     }
 }
 

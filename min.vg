@@ -24,6 +24,17 @@ case' x = case x of _ => x ?>
 generics<a>: a -> a
 generics x = x
 
+data GenData<a> = Build a
+
+gen_struct<a>: a -> (GenData a)
+gen_struct x = GenData.Build x
+
+gen_struct_int: Int -> (GenData Int)
+gen_struct_int x = gen_struct x
+
+gen_struct_int': Int -> (GenData Int)
+gen_struct_int' x = GenData.Build x
+
 /*
 trait Foo a where
     bar: a -> a

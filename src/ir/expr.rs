@@ -73,7 +73,11 @@ impl Display for ExprKind {
             Self::Int(i) => Display::fmt(i, f),
             Self::Add(l, r) => write!(f, "({} + {})", l, r),
             Self::Application(l, r) => write!(f, "({} {})", l, r),
-            _ => unimplemented!(),
+            Self::Type(ty) => write!(f, "{}", ty),
+            x => {
+                dbg!(x);
+                unimplemented!()
+            }
         }
     }
 }
@@ -576,15 +580,7 @@ pub fn parse_expr(
             _ => unimplemented!(),
         },
         Ast::Let { var, assign, expr } => {
-            parse_let_expr(
-                var,
-                assign,
-                expr,
-                token.span,
-                ctx,
-                g,
-                expected,
-            )
+            parse_let_expr(var, assign, expr, token.span, ctx, g, expected)
         }
         Ast::IfThenElse {
             if_: _,
@@ -637,7 +633,7 @@ pub fn parse_expr(
 fn monomorphize(mut expr: Expr, expected: Option<Rc<Type>>) -> Expr {
     let expected = match expected {
         Some(ex) => ex,
-        None => return expr
+        None => return expr,
     };
     expr.ty = monomorphize_ty(expr.ty.clone(), expected);
     expr
@@ -645,15 +641,13 @@ fn monomorphize(mut expr: Expr, expected: Option<Rc<Type>>) -> Expr {
 
 fn monomorphize_ty(ty: Rc<Type>, expected: Rc<Type>) -> Rc<Type> {
     match (ty.as_ref(), expected.as_ref()) {
-        (Type::Function(f), Type::Function(ef)) => {
-            match f.get_value.as_ref() {
-                Type::Generic(g) => {
-                    return ty.clone().update_set_generic_func(g, &ef.get_value);
-                },
-                _ => ty.clone()
+        (Type::Function(f), Type::Function(ef)) => match f.get_value.as_ref() {
+            Type::Generic(g) => {
+                return ty.clone().update_set_generic_func(g, &ef.get_value);
             }
-        }
-        _ => ty.clone()
+            _ => ty.clone(),
+        },
+        _ => ty.clone(),
     }
 }
 

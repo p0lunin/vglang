@@ -59,7 +59,7 @@ impl Type {
                     self
                 }
             }
-            _ => self
+            _ => self,
         }
     }
 }

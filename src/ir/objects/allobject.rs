@@ -41,7 +41,7 @@ impl Object {
             Object::FunctionDefinition(f) => f.ftype.clone(),
             Object::Type(_t) => Type::typ(),
             Object::Arg(a) => a.ty.clone(),
-            Object::Enum(e) => Rc::new(Type::Data(e.ty.clone())),
+            Object::Enum(e) => e.ty(),
             Object::EnumVariant(e) => Rc::new(Type::Data(e.dty.clone())),
             Object::Var(v) => v.ty.clone(),
         }
