@@ -51,7 +51,7 @@ peg::parser! { grammar lang() for str {
         = i:ident() __ { i }
 
     rule types_space(i: usize) -> Token
-        = t:logic(i) _ { t }
+        = t:logic2(i) _ { t }
 
     rule enum_decl() -> Spanned<TopLevelToken>
         = s:position!() "data" __ id:ident() gs:generics(1) _ "=" _ vs:(enum_variant(1) ** "|") e:position!() {
@@ -107,21 +107,24 @@ peg::parser! { grammar lang() for str {
 
     rule pattern() -> Pattern
         =
-        "_" !ident() {
+        p:path() __ pats:(SP(<pattern_without_path()>) ** __) {
+            Pattern::Variant(p, pats)
+        } /
+        pattern_without_path()
+
+    rule pattern_without_path() -> Pattern =
+        "_" {
             Pattern::Otherwise
         } /
         "(" _ pat:pattern() _ ")" { pat } /
-        id:ident() _ "@" _ pat:SP(<pattern()>) {
+        /*id:ident() _ "@" _ pat:SP(<pattern()>) {
             Pattern::Bind(id, Box::new(pat))
-        } /
-        id:ident() !(_ ident() / ".") {
+        } / */
+        id:ident() {
             match (id.as_bytes()[0] as char).is_lowercase() {
                 true => Pattern::Ident(id.inner()),
                 false => Pattern::Variant(Path::Place(id.inner()), vec![])
             }
-        } /
-        p:path() _ pats:(SP(<pattern()>) ** "") {
-            Pattern::Variant(p, pats)
         }
 
     rule SP<T>(rul: rule<T>) -> Spanned<T>
@@ -157,6 +160,8 @@ peg::parser! { grammar lang() for str {
         }
 
     rule logic(i: usize) -> Token = precedence! {
+        x:@ _ "->" inli(i) y:(@) { Token::new(x.span.extend(&y.span), Ast::Implication(Box::new(x), Box::new(y)))}
+        --
         x:(@) " " y:@ { Token::new(x.span.extend(&y.span), Ast::CallFunction(Box::new(x), Box::new(y))) }
         --
         x:(@) _ "." inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Dot(Box::new(x), Box::new(y))) }
@@ -191,8 +196,6 @@ peg::parser! { grammar lang() for str {
         --
         x:@ _ "^" inli(i) y:(@) { Token::new(x.span.extend(&y.span), Ast::Pow(Box::new(x), Box::new(y))) }
         --
-        x:@ _ "->" inli(i) y:(@) { Token::new(x.span.extend(&y.span), Ast::Implication(Box::new(x), Box::new(y)))}
-        --
         start:position!() "(" inli(i) v:logic(i) inli(i) ")" end:position!() {
             Token::new(Span::new(start, end), Ast::Parenthesis(Box::new(v)))
         }
@@ -201,6 +204,8 @@ peg::parser! { grammar lang() for str {
     }
 
     rule logic2(i: usize) -> Token = precedence! {
+        x:@ _ "->" inli(i) y:(@) { Token::new(x.span.extend(&y.span), Ast::Implication(Box::new(x), Box::new(y)))}
+        --
         x:(@) inli(i) "|" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Or(Box::new(x), Box::new(y))) }
         --
         x:(@) inli(i) "&" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::And(Box::new(x), Box::new(y))) }
@@ -220,8 +225,6 @@ peg::parser! { grammar lang() for str {
         x:(@) inli(i) "/" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Div(Box::new(x), Box::new(y))) }
         --
         x:@ inli(i) "^" inli(i) y:(@) { Token::new(x.span.extend(&y.span), Ast::Pow(Box::new(x), Box::new(y))) }
-        --
-        x:@ inli(i) "->" inli(i) y:(@) { Token::new(x.span.extend(&y.span), Ast::Implication(Box::new(x), Box::new(y)))}
         --
         start:position!() "(" inli(i) v:logic(i) inli(i) ")" end:position!() {
             Token::new(Span::new(start, end), Ast::Parenthesis(Box::new(v)))
@@ -277,7 +280,10 @@ peg::parser! { grammar lang() for str {
             (n, Span::new(s, e))
         }
     rule ident() -> Spanned<String>
-        = s:position!() !"data" !"in" !"of" ident:$(['a'..='z'|'A'..='Z'|'_'] ['a'..='z'|'A'..='Z'|'0'..='9'|'_'|'\'']*) e:position!() {
+        = s:position!() !"data" !"in" !"of" ident:$(
+            (['a'..='z'|'A'..='Z'] ['a'..='z'|'A'..='Z'|'0'..='9'|'_'|'\'']*) /
+            (['_'] ['a'..='z'|'A'..='Z'|'0'..='9'|'_'|'\'']+)
+        ) e:position!() {
             Spanned::new(String::from(ident), Span::new(s, e))
         }
 

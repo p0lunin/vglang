@@ -1,5 +1,8 @@
 use crate::syntax::ast::Path;
 use std::ops::Deref;
+use crate::ir::objects::Object;
+use crate::ir::types::Type;
+use std::rc::Rc;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Context<'a, T: 'a> {
@@ -15,6 +18,21 @@ impl<'a, T: 'a> Context<'a, T> {
         }
     }
 }
+
+impl<'a> Context<'a, Object> {
+    pub fn find_ty(&self, name: &str) -> Option<Rc<Type>> {
+        let obj = self.find(name)?;
+        match obj {
+            Object::EnumDecl(e) => { Some(Rc::new(Type::Data(e))) }
+            Object::Enum(e) => { Some(Rc::new(Type::Data(e.ty.clone()))) }
+            Object::Type(ty) => {
+                Some(ty.def.clone())
+            }
+            _ => None
+        }
+    }
+}
+
 
 impl<'a, T: HasName + Clone + 'a> Searchable for Context<'a, T> {
     type Item = T;

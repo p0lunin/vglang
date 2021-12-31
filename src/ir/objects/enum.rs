@@ -71,21 +71,24 @@ impl DataDef {
                 .map(|g| Rc::new(Type::Generic(Generic::parse(g.inner()))))
                 .collect(),
         });
+        let mut objects = ty
+            .generics
+            .iter()
+            .map(|ty| {
+                let name = match ty.as_ref() {
+                    Type::Generic(g) => &g.name,
+                    _ => unreachable!(),
+                };
+                Object::Type(Rc::new(TypeObject {
+                    name: name.as_str().to_string(),
+                    def: Rc::new(Type::Generic(Generic { name: name.clone() })),
+                }))
+            })
+            .collect::<Vec<_>>();
+        objects.push(Object::EnumDecl(ty.clone()));
+
         let ctx = Context {
-            objects: ty
-                .generics
-                .iter()
-                .map(|ty| {
-                    let name = match ty.as_ref() {
-                        Type::Generic(g) => &g.name,
-                        _ => unreachable!(),
-                    };
-                    Object::Type(Rc::new(TypeObject {
-                        name: name.as_str().to_string(),
-                        def: Rc::new(Type::Generic(Generic { name: name.clone() })),
-                    }))
-                })
-                .collect(),
+            objects,
             parent: Some(ctx),
         };
         Ok(Self {
@@ -120,7 +123,7 @@ pub struct DataVariant {
 impl DataVariant {
     pub fn get_type(&self) -> Rc<Type> {
         let mut ty = Rc::new(Type::Data(self.dty.clone()));
-        for t in self.data.iter() {
+        for t in self.data.iter().rev() {
             ty = Rc::new(Type::Function(Function {
                 get_value: t.clone(),
                 return_value: ty,

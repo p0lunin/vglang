@@ -1,5 +1,5 @@
 use crate::common::{HasName, Searchable};
-use crate::ir::objects::{Arg, DataDef, DataVariant, FunctionDefinition, TypeObject, Var};
+use crate::ir::objects::{Arg, DataDef, DataVariant, FunctionDefinition, TypeObject, Var, DataType};
 use crate::ir::types::Type;
 use std::fmt::{Display, Formatter};
 use std::rc::Rc;
@@ -7,6 +7,7 @@ use std::rc::Rc;
 #[derive(Debug, PartialEq, Clone)]
 pub enum Object {
     FunctionDefinition(Rc<FunctionDefinition>),
+    EnumDecl(Rc<DataType>),
     Enum(Rc<DataDef>),
     EnumVariant(Rc<DataVariant>),
     Arg(Rc<Arg>),
@@ -31,6 +32,7 @@ impl Searchable for Object {
             Object::Arg(_) => None,
             Object::Var(_) => None,
             Object::Type(_) => None,
+            Object::EnumDecl(_) => None,
         }
     }
 }
@@ -44,6 +46,7 @@ impl Object {
             Object::Enum(e) => e.ty(),
             Object::EnumVariant(e) => Rc::new(Type::Data(e.dty.clone())),
             Object::Var(v) => v.ty.clone(),
+            Object::EnumDecl(e) => e.ty(),
         }
     }
 }
@@ -57,6 +60,7 @@ impl Display for Object {
             Object::Arg(_) => unimplemented!(),
             Object::Enum(e) => Display::fmt(e, f),
             Object::EnumVariant(e) => Display::fmt(e, f),
+            Object::EnumDecl(e) => Display::fmt(e, f),
         }
     }
 }
@@ -70,6 +74,7 @@ impl HasName for Object {
             Object::Arg(a) => &a.name,
             Object::Enum(e) => e.ty.name.as_str(),
             Object::EnumVariant(e) => e.name.as_str(),
+            Object::EnumDecl(e) => e.name.as_str()
         }
     }
 }

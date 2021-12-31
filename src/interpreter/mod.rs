@@ -5,7 +5,7 @@ use crate::ir::objects::{
 use crate::ir::patmat::Pattern;
 use crate::ir::types::Type;
 use crate::ir::{parse_expr, Expr, ExprKind};
-use crate::syntax::ast::Token;
+use crate::syntax::ast::{Token, Path};
 use itertools::Itertools;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
@@ -47,6 +47,7 @@ impl Interpreter<'_> {
                         Object::Arg(_) => unimplemented!(),
                         Object::Var(_) => unimplemented!(),
                         Object::Type(_) => unimplemented!(),
+                        Object::EnumDecl(_) => unimplemented!(),
                     },
                     None => Err(Error::custom(expr.span, format!("Not found {}", i))),
                 },
@@ -68,10 +69,6 @@ impl Interpreter<'_> {
                         }
                     })
             }),
-            ExprKind::Add(l, r) => self.eval(l, bc_ctx).and_then(|left| {
-                self.eval(r, bc_ctx)
-                    .and_then(|right| ByteCode::add(left, right))
-            }),
             ExprKind::Let { var, assign, expr } => {
                 let assigned = self.eval(assign.as_ref(), bc_ctx)?;
                 let ctx = Context {
@@ -87,6 +84,18 @@ impl Interpreter<'_> {
             ExprKind::DataVariant(v) => {
                 self.eval_func(vec![], Callable::DataVariant(v.clone()), v.get_type())
             }
+            ExprKind::Add(l, r) => self.eval(l, bc_ctx).and_then(|left| {
+                self.eval(r, bc_ctx)
+                    .and_then(|right| ByteCode::add(left, right))
+            }),
+            ExprKind::Le(l, r) => self.eval(l, bc_ctx).and_then(|left| {
+                self.eval(r, bc_ctx)
+                    .and_then(|right| ByteCode::le(left, right).map(|x| into_to_bool(x, &self.ctx)))
+            }),
+            ExprKind::Gr(l, r) => self.eval(l, bc_ctx).and_then(|left| {
+                self.eval(r, bc_ctx)
+                    .and_then(|right| ByteCode::gr(left, right).map(|x| into_to_bool(x, &self.ctx)))
+            }),
             _ => unimplemented!(),
         }
     }
@@ -265,6 +274,20 @@ impl ByteCode {
     }
 }
 
+fn into_to_bool(bc: ByteCode, ctx: &Context<Object>) -> ByteCode {
+    match bc {
+        ByteCode::Int(0) => match ctx.find_by_path(&Path::Path("Bool".into(), Box::new(Path::Place("False".into())))) {
+            Some(Object::EnumVariant(v)) => ByteCode::DataVariant(v, vec![]),
+            _ => unreachable!()
+        }
+        ByteCode::Int(1) => match ctx.find_by_path(&Path::Path("Bool".into(), Box::new(Path::Place("True".into())))) {
+            Some(Object::EnumVariant(v)) => ByteCode::DataVariant(v, vec![]),
+            _ => unreachable!()
+        }
+        _ => unreachable!()
+    }
+}
+
 impl Display for ByteCode {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         match self {
@@ -284,6 +307,26 @@ impl ByteCode {
     fn add(self, other: Self) -> Result<Self, Error> {
         match (self, other) {
             (ByteCode::Int(i), ByteCode::Int(i2)) => Ok(ByteCode::Int(i + i2)),
+            (ByteCode::Var(_, bc), right) => bc.add(right),
+            (left, ByteCode::Var(_, bc)) => left.add(*bc),
+            (ByteCode::Arg(_, bc), right) => bc.add(right),
+            (left, ByteCode::Arg(_, bc)) => left.add(*bc),
+            _ => unimplemented!(),
+        }
+    }
+    fn le(self, other: Self) -> Result<Self, Error> {
+        match (self, other) {
+            (ByteCode::Int(i), ByteCode::Int(i2)) => Ok(ByteCode::Int((i < i2) as i128)),
+            (ByteCode::Var(_, bc), right) => bc.add(right),
+            (left, ByteCode::Var(_, bc)) => left.add(*bc),
+            (ByteCode::Arg(_, bc), right) => bc.add(right),
+            (left, ByteCode::Arg(_, bc)) => left.add(*bc),
+            _ => unimplemented!(),
+        }
+    }
+    fn gr(self, other: Self) -> Result<Self, Error> {
+        match (self, other) {
+            (ByteCode::Int(i), ByteCode::Int(i2)) => Ok(ByteCode::Int((i > i2) as i128)),
             (ByteCode::Var(_, bc), right) => bc.add(right),
             (left, ByteCode::Var(_, bc)) => left.add(*bc),
             (ByteCode::Arg(_, bc), right) => bc.add(right),

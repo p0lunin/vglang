@@ -27,16 +27,20 @@ pub fn compile_file<'a>(
     };
     let mut data = String::new();
     file.read_to_string(&mut data).unwrap();
-    let ast = match parse_text(&data) {
+    compile_code(data.as_str(), top)
+}
+
+pub fn compile_code<'a>(code: &str, top: Option<&'a Context<'a, Object>>,) -> Result<(Context<'a, Object>, Implementations), String> {
+    let ast = match parse_text(&code) {
         Ok(d) => d,
         Err(e) => {
-            return Err(peg_error_to_showed(e, &data));
+            return Err(peg_error_to_showed(e, &code));
         }
     };
     let (ctx, impls) = match parse_tokens(ast, top) {
         Ok(t) => t,
         Err(errs) => {
-            return Err(errs.into_iter().map(|e| e.display(&data)).join("\n"));
+            return Err(errs.into_iter().map(|e| e.display(&code)).join("\n"));
         }
     };
     Ok((ctx, impls))
@@ -45,4 +49,10 @@ pub fn compile_file<'a>(
 pub fn eval(interpreter: &mut Interpreter, text: &str) -> Result<ByteCode, String> {
     let token = parse_token(text).map_err(|e| peg_error_to_showed(e, text))?;
     interpreter.execute_code(token).map_err(|e| e.display(text))
+}
+
+pub fn load_core() -> (Context<'static, Object>, Implementations) {
+    let core = include_str!("../core/core.vg");
+    compile_code(core, None)
+        .expect("Core should be valid")
 }

@@ -1,5 +1,5 @@
 use clap::{App, Arg};
-use fsmcreator::{compile_file, eval, Implementations, Interpreter};
+use fsmcreator::{compile_file, eval, Interpreter, load_core};
 use std::io;
 use std::io::{stdin, Write};
 /*use z3::ast::Ast;
@@ -43,9 +43,12 @@ fn main() {
         }
     };
     let path_to_std = matches.value_of("std");
+
+    let (core_ctx, core_impls) = load_core();
+
     let ctx = {
         path_to_std.and_then(|path_to_std| {
-            let ctx = match compile_file(path_to_std, None) {
+            let ctx = match compile_file(path_to_std, Some(&core_ctx)) {
                 Ok(ctx) => ctx,
                 Err(e) => {
                     println!("{}", e);
@@ -56,10 +59,13 @@ fn main() {
         })
     };
     let (ctx, mut impls) = match ctx {
-        Some((c, impls)) => (Some(c), impls),
-        None => (None, Implementations::new()),
+        Some((c, mut impls)) => {
+            impls.extend(core_impls);
+            (c, impls)
+        },
+        None => (core_ctx, core_impls),
     };
-    let (ctx, impls2) = match compile_file(path_to_file, ctx.as_ref()) {
+    let (ctx, impls2) = match compile_file(path_to_file, Some(&ctx)) {
         Ok(ctx) => ctx,
         Err(e) => {
             println!("{}", e);

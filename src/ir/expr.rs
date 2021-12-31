@@ -170,29 +170,35 @@ impl Expr {
         let span = self.span.extend(&other.span);
         op_expr(self, other, ExprKind::Pow).map_err(|s| Error::Custom(span, s, "-here".to_string()))
     }
-    pub fn and(self, other: Expr) -> Result<Self, Error> {
-        logical_op(self, other, ExprKind::And)
+    pub fn and(self, other: Expr, bool_ty: Rc<Type>) -> Result<Self, Error> {
+        logical_op(self, other, bool_ty, ExprKind::And)
     }
-    pub fn or(self, other: Expr) -> Result<Self, Error> {
-        logical_op(self, other, ExprKind::Or)
+    pub fn or(self, other: Expr, bool_ty: Rc<Type>) -> Result<Self, Error> {
+        logical_op(self, other, bool_ty, ExprKind::Or)
     }
-    pub fn eq(self, other: Expr) -> Result<Self, Error> {
-        logical_op(self, other, ExprKind::Eq)
+    pub fn eq(self, other: Expr, bool_ty: Rc<Type>) -> Result<Self, Error> {
+        let span = self.span.extend(&other.span);
+        compare_op(self, other, bool_ty, ExprKind::Eq).map_err(|s| Error::Custom(span, s, "-here".to_string()))
     }
-    pub fn not_eq(self, other: Expr) -> Result<Self, Error> {
-        logical_op(self, other, ExprKind::NotEq)
+    pub fn not_eq(self, other: Expr, bool_ty: Rc<Type>) -> Result<Self, Error> {
+        let span = self.span.extend(&other.span);
+        compare_op(self, other, bool_ty, ExprKind::NotEq).map_err(|s| Error::Custom(span, s, "-here".to_string()))
     }
-    pub fn gr(self, other: Expr) -> Result<Self, Error> {
-        logical_op(self, other, ExprKind::Gr)
+    pub fn gr(self, other: Expr, bool_ty: Rc<Type>) -> Result<Self, Error> {
+        let span = self.span.extend(&other.span);
+        compare_op(self, other, bool_ty, ExprKind::Gr).map_err(|s| Error::Custom(span, s, "-here".to_string()))
     }
-    pub fn gr_or_eq(self, other: Expr) -> Result<Self, Error> {
-        logical_op(self, other, ExprKind::GrOrEq)
+    pub fn gr_or_eq(self, other: Expr, bool_ty: Rc<Type>) -> Result<Self, Error> {
+        let span = self.span.extend(&other.span);
+        compare_op(self, other, bool_ty, ExprKind::GrOrEq).map_err(|s| Error::Custom(span, s, "-here".to_string()))
     }
-    pub fn le(self, other: Expr) -> Result<Self, Error> {
-        logical_op(self, other, ExprKind::Le)
+    pub fn le(self, other: Expr, bool_ty: Rc<Type>) -> Result<Self, Error> {
+        let span = self.span.extend(&other.span);
+        compare_op(self, other, bool_ty, ExprKind::Le).map_err(|s| Error::Custom(span, s, "-here".to_string()))
     }
-    pub fn le_or_eq(self, other: Expr) -> Result<Self, Error> {
-        logical_op(self, other, ExprKind::LeOrEq)
+    pub fn le_or_eq(self, other: Expr, bool_ty: Rc<Type>) -> Result<Self, Error> {
+        let span = self.span.extend(&other.span);
+        compare_op(self, other, bool_ty, ExprKind::LeOrEq).map_err(|s| Error::Custom(span, s, "-here".to_string()))
     }
     pub fn dot(self, name: String, ctx: &Context<'_, Object>, span: Span) -> Result<Self, Error> {
         match self.kind {
@@ -214,7 +220,7 @@ impl Expr {
     }
 }
 
-fn logical_op<F>(left: Expr, right: Expr, f: F) -> Result<Expr, Error>
+fn logical_op<F>(left: Expr, right: Expr, bool_ty: Rc<Type>, f: F) -> Result<Expr, Error>
 where
     F: Fn(Box<Expr>, Box<Expr>) -> ExprKind,
 {
@@ -225,6 +231,35 @@ where
             f(Box::new(left), Box::new(right)),
         )),
         _ => unimplemented!(),
+    }
+}
+
+fn compare_op<F>(left: Expr, right: Expr, bool_ty: Rc<Type>, f: F) -> Result<Expr, String>
+where
+    F: Fn(Box<Expr>, Box<Expr>) -> ExprKind,
+{
+    match left.ty.deref() {
+        Type::Type => return Ok(Expr::new(
+            Type::typ(),
+            left.span.extend(&right.span),
+            f(Box::new(left), Box::new(right)),
+        )),
+        _ => { },
+    }
+
+    match (
+        left.ty.get_inner_type().deref(),
+        right.ty.get_inner_type().deref(),
+    ) {
+        (Type::Int, Type::Int) => Ok(Expr::new(
+            bool_ty,
+            left.span.extend(&right.span),
+            f(Box::new(left), Box::new(right)),
+        )),
+        _ => Err(format!(
+            "Compare ops only for ints, got {} and {}",
+            left.ty, right.ty
+        )),
     }
 }
 
@@ -376,7 +411,7 @@ pub fn parse_expr(
                 ctx,
                 g,
                 expected.clone(),
-                Expr::and,
+                |x, y| Expr::and(x, y, ctx.find_ty("Bool").unwrap()),
             )? {
                 Some(e) => check_type(e, expected),
                 None => Ok(None),
@@ -390,7 +425,7 @@ pub fn parse_expr(
                 ctx,
                 g,
                 expected.clone(),
-                Expr::or,
+                |x, y| Expr::or(x, y, ctx.find_ty("Bool").unwrap()),
             )? {
                 Some(e) => check_type(e, expected),
                 None => Ok(None),
@@ -404,7 +439,7 @@ pub fn parse_expr(
                 ctx,
                 g,
                 expected.clone(),
-                Expr::gr,
+                |x, y| Expr::gr(x, y, ctx.find_ty("Bool").unwrap()),
             )? {
                 Some(e) => check_type(e, expected),
                 None => Ok(None),
@@ -418,7 +453,7 @@ pub fn parse_expr(
                 ctx,
                 g,
                 expected.clone(),
-                Expr::le,
+                |x, y| Expr::le(x, y, ctx.find_ty("Bool").unwrap()),
             )? {
                 Some(e) => check_type(e, expected),
                 None => Ok(None),
@@ -432,7 +467,7 @@ pub fn parse_expr(
                 ctx,
                 g,
                 expected.clone(),
-                Expr::gr_or_eq,
+                |x, y| Expr::gr_or_eq(x, y, ctx.find_ty("Bool").unwrap()),
             )? {
                 Some(e) => check_type(e, expected),
                 None => Ok(None),
@@ -446,7 +481,7 @@ pub fn parse_expr(
                 ctx,
                 g,
                 expected.clone(),
-                Expr::le_or_eq,
+                |x, y| Expr::le_or_eq(x, y, ctx.find_ty("Bool").unwrap()),
             )? {
                 Some(e) => check_type(e, expected),
                 None => Ok(None),
@@ -575,7 +610,9 @@ pub fn parse_expr(
         Ast::Dot(l, r) => match &r.ast {
             Ast::Ident(i) => {
                 let left = parse_expr(l, ctx, g, None)?.unwrap();
-                left.dot(i.clone(), ctx, token.span).map(Some)
+                let expr = left.dot(i.clone(), ctx, token.span)?;
+                let ty = monomorphize(expr, expected);
+                Ok(Some(ty))
             }
             _ => unimplemented!(),
         },

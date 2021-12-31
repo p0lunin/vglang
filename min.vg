@@ -9,6 +9,9 @@ caseFoo x = case x of
 makeA: Foo
 makeA = Foo.A
 
+add: Int -> Int -> Int
+add x y = x + y
+
 add1: Int -> Int
 add1 x = x + 1
 
@@ -34,6 +37,29 @@ gen_struct_int x = gen_struct x
 
 gen_struct_int': Int -> (GenData Int)
 gen_struct_int' x = GenData.Build x
+
+data List<a> = Nil | Cons a (List a)
+
+cons<a>: a -> List a -> List a
+cons x xs = List.Cons x xs
+
+nil<a>: List a
+nil = List.Nil
+
+nsert_sorted: Int -> List Int -> List Int
+nsert_sorted x xs = case xs of
+    List.Nil => cons x nil
+    List.Cons y xs' => case x < y of
+        Bool.True => x `cons` (y `cons` nil)
+        Bool.False => y `cons` (nsert_sorted x xs') ?>?>
+
+sort_inner: List Int -> List Int -> List Int
+sort_inner xs ys = case xs of
+    List.Nil => ys
+    List.Cons x xs' => sort_inner xs' (nsert_sorted x ys) ?>
+
+sort: List Int -> List Int
+sort xs = sort_inner xs nil
 
 /*
 trait Foo a where

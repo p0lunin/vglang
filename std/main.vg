@@ -7,5 +7,3 @@ type U64 = val >= 0 & val < 2^64
 type U32 = val >= 0 & val < 2^32
 type U16 = val >= 0 & val < 2^16
 type U8 = val >= 0 & val < 2^8
-
-data Bool = True | False
