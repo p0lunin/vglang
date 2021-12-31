@@ -1,5 +1,5 @@
 use crate::{
-    common::{Span, Spanned},
+    common::{Span, Spanned, BinOp},
     syntax::ast::*,
 };
 
@@ -176,25 +176,25 @@ peg::parser! { grammar lang() for str {
             ))
         }
         --
-        x:(@) _ "|" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Or(Box::new(x), Box::new(y))) }
+        x:(@) _ "|" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::BinOp(Box::new(x), Box::new(y), BinOp::Or)) }
         --
-        x:(@) _ "&" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::And(Box::new(x), Box::new(y))) }
+        x:(@) _ "&" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::BinOp(Box::new(x), Box::new(y), BinOp::And)) }
         --
-        x:(@) _ ">" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Gr(Box::new(x), Box::new(y))) }
-        x:(@) _ "<" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Le(Box::new(x), Box::new(y))) }
-        x:(@) _ ">=" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::GrEq(Box::new(x), Box::new(y))) }
-        x:(@) _ "<=" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::LeEq(Box::new(x), Box::new(y))) }
-        x:(@) _ "==" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Eq(Box::new(x), Box::new(y))) }
-        x:(@) _ "!=" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::NotEq(Box::new(x), Box::new(y))) }
+        x:(@) _ ">" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::BinOp(Box::new(x), Box::new(y), BinOp::Gr)) }
+        x:(@) _ "<" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::BinOp(Box::new(x), Box::new(y), BinOp::Le)) }
+        x:(@) _ ">=" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::BinOp(Box::new(x), Box::new(y), BinOp::GrOrEq)) }
+        x:(@) _ "<=" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::BinOp(Box::new(x), Box::new(y), BinOp::LeOrEq)) }
+        x:(@) _ "==" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::BinOp(Box::new(x), Box::new(y), BinOp::Eq)) }
+        x:(@) _ "!=" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::BinOp(Box::new(x), Box::new(y), BinOp::NotEq)) }
         --
-        x:(@) _ "+" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Add(Box::new(x), Box::new(y))) }
-        x:(@) _ "-" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Sub(Box::new(x), Box::new(y))) }
+        x:(@) _ "+" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::BinOp(Box::new(x), Box::new(y), BinOp::Add)) }
+        x:(@) _ "-" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::BinOp(Box::new(x), Box::new(y), BinOp::Sub)) }
         start:position!() inli(i) "-" inli(i) x:@ { Token::new(Span::new(start, x.span.end), Ast::Neg(Box::new(x))) }
         --
-        x:(@) _ "*" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Mul(Box::new(x), Box::new(y))) }
-        x:(@) _ "/" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Div(Box::new(x), Box::new(y))) }
+        x:(@) _ "*" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::BinOp(Box::new(x), Box::new(y), BinOp::Mul)) }
+        x:(@) _ "/" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::BinOp(Box::new(x), Box::new(y), BinOp::Div)) }
         --
-        x:@ _ "^" inli(i) y:(@) { Token::new(x.span.extend(&y.span), Ast::Pow(Box::new(x), Box::new(y))) }
+        x:@ _ "^" inli(i) y:(@) { Token::new(x.span.extend(&y.span), Ast::BinOp(Box::new(x), Box::new(y), BinOp::Pow)) }
         --
         start:position!() "(" inli(i) v:logic(i) inli(i) ")" end:position!() {
             Token::new(Span::new(start, end), Ast::Parenthesis(Box::new(v)))
@@ -206,25 +206,25 @@ peg::parser! { grammar lang() for str {
     rule logic2(i: usize) -> Token = precedence! {
         x:@ _ "->" inli(i) y:(@) { Token::new(x.span.extend(&y.span), Ast::Implication(Box::new(x), Box::new(y)))}
         --
-        x:(@) inli(i) "|" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Or(Box::new(x), Box::new(y))) }
+        x:(@) inli(i) "|" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::BinOp(Box::new(x), Box::new(y), BinOp::Or)) }
         --
-        x:(@) inli(i) "&" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::And(Box::new(x), Box::new(y))) }
+        x:(@) inli(i) "&" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::BinOp(Box::new(x), Box::new(y), BinOp::And)) }
         --
-        x:(@) inli(i) ">" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Gr(Box::new(x), Box::new(y))) }
-        x:(@) inli(i) "<" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Le(Box::new(x), Box::new(y))) }
-        x:(@) inli(i) ">=" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::GrEq(Box::new(x), Box::new(y))) }
-        x:(@) inli(i) "<=" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::LeEq(Box::new(x), Box::new(y))) }
-        x:(@) inli(i) "==" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Eq(Box::new(x), Box::new(y))) }
-        x:(@) inli(i) "!=" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::NotEq(Box::new(x), Box::new(y))) }
+        x:(@) inli(i) ">" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::BinOp(Box::new(x), Box::new(y), BinOp::Gr)) }
+        x:(@) inli(i) "<" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::BinOp(Box::new(x), Box::new(y), BinOp::Le)) }
+        x:(@) inli(i) ">=" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::BinOp(Box::new(x), Box::new(y), BinOp::GrOrEq)) }
+        x:(@) inli(i) "<=" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::BinOp(Box::new(x), Box::new(y), BinOp::LeOrEq)) }
+        x:(@) inli(i) "==" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::BinOp(Box::new(x), Box::new(y), BinOp::Eq)) }
+        x:(@) inli(i) "!=" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::BinOp(Box::new(x), Box::new(y), BinOp::NotEq)) }
         --
-        x:(@) inli(i) "+" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Add(Box::new(x), Box::new(y))) }
-        x:(@) inli(i) "-" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Sub(Box::new(x), Box::new(y))) }
+        x:(@) inli(i) "+" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::BinOp(Box::new(x), Box::new(y), BinOp::Add)) }
+        x:(@) inli(i) "-" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::BinOp(Box::new(x), Box::new(y), BinOp::Sub)) }
         start:position!() inli(i) "-" inli(i) x:@ { Token::new(Span::new(start, x.span.end), Ast::Neg(Box::new(x))) }
         --
-        x:(@) inli(i) "*" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Mul(Box::new(x), Box::new(y))) }
-        x:(@) inli(i) "/" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::Div(Box::new(x), Box::new(y))) }
+        x:(@) inli(i) "*" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::BinOp(Box::new(x), Box::new(y), BinOp::Mul)) }
+        x:(@) inli(i) "/" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::BinOp(Box::new(x), Box::new(y), BinOp::Div)) }
         --
-        x:@ inli(i) "^" inli(i) y:(@) { Token::new(x.span.extend(&y.span), Ast::Pow(Box::new(x), Box::new(y))) }
+        x:@ inli(i) "^" inli(i) y:(@) { Token::new(x.span.extend(&y.span), Ast::BinOp(Box::new(x), Box::new(y), BinOp::Pow)) }
         --
         start:position!() "(" inli(i) v:logic(i) inli(i) ")" end:position!() {
             Token::new(Span::new(start, end), Ast::Parenthesis(Box::new(v)))

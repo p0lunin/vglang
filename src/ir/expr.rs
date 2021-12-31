@@ -1,4 +1,4 @@
-use crate::common::{Context, Error, Searchable, SearchableByPath, Span, Spanned};
+use crate::common::{Context, Error, Searchable, SearchableByPath, Span, Spanned, BinOp};
 use crate::ir::objects::{DataVariant, Object, Var};
 use crate::ir::types::base_types::Function;
 use crate::ir::types::Type;
@@ -31,19 +31,7 @@ impl Expr {
 #[derive(Debug, PartialEq, Clone)]
 pub enum ExprKind {
     Int(i128),
-    Add(Box<Expr>, Box<Expr>),
-    Sub(Box<Expr>, Box<Expr>),
-    Mul(Box<Expr>, Box<Expr>),
-    Div(Box<Expr>, Box<Expr>),
-    Pow(Box<Expr>, Box<Expr>),
-    And(Box<Expr>, Box<Expr>),
-    Or(Box<Expr>, Box<Expr>),
-    Gr(Box<Expr>, Box<Expr>),
-    Eq(Box<Expr>, Box<Expr>),
-    NotEq(Box<Expr>, Box<Expr>),
-    GrOrEq(Box<Expr>, Box<Expr>),
-    Le(Box<Expr>, Box<Expr>),
-    LeOrEq(Box<Expr>, Box<Expr>),
+    BinOp(Box<Expr>, Box<Expr>, BinOp),
     Neg(Box<Expr>),
     Dot(Box<Expr>, Box<Expr>),
     Type(Rc<Type>),
@@ -71,7 +59,7 @@ impl Display for ExprKind {
         match self {
             Self::Ident(i) => Display::fmt(i, f),
             Self::Int(i) => Display::fmt(i, f),
-            Self::Add(l, r) => write!(f, "({} + {})", l, r),
+            Self::BinOp(l, r, op) => write!(f, "({} {} {})", l, op, r),
             Self::Application(l, r) => write!(f, "({} {})", l, r),
             Self::Type(ty) => write!(f, "{}", ty),
             x => {
@@ -87,19 +75,7 @@ impl Expr {
         match self.kind {
             ExprKind::Type(t) => Ok(t),
             ExprKind::Int(_) => Ok(Rc::new(Type::Expr(self))),
-            ExprKind::Add(_, _) => Ok(Rc::new(Type::Expr(self))),
-            ExprKind::Sub(_, _) => Ok(Rc::new(Type::Expr(self))),
-            ExprKind::Mul(_, _) => Ok(Rc::new(Type::Expr(self))),
-            ExprKind::Div(_, _) => Ok(Rc::new(Type::Expr(self))),
-            ExprKind::Pow(_, _) => Ok(Rc::new(Type::Expr(self))),
-            ExprKind::And(_, _) => Ok(Rc::new(Type::Expr(self))),
-            ExprKind::Or(_, _) => Ok(Rc::new(Type::Expr(self))),
-            ExprKind::Gr(_, _) => Ok(Rc::new(Type::Expr(self))),
-            ExprKind::Eq(_, _) => Ok(Rc::new(Type::Expr(self))),
-            ExprKind::NotEq(_, _) => Ok(Rc::new(Type::Expr(self))),
-            ExprKind::GrOrEq(_, _) => Ok(Rc::new(Type::Expr(self))),
-            ExprKind::Le(_, _) => Ok(Rc::new(Type::Expr(self))),
-            ExprKind::LeOrEq(_, _) => Ok(Rc::new(Type::Expr(self))),
+            ExprKind::BinOp(_, _, _) => Ok(Rc::new(Type::Expr(self))),
             ExprKind::Neg(_) => Ok(Rc::new(Type::Expr(self))),
             ExprKind::Ident(i) => match ctx.find(i.as_str()).unwrap() {
                 Object::Type(t) => Ok(t.def.clone()),
@@ -124,10 +100,10 @@ impl Expr {
     }
 }
 
-fn op_expr<F: Fn(Box<Expr>, Box<Expr>) -> ExprKind>(
+fn op_expr(
     left: Expr,
     right: Expr,
-    func: F,
+    op: BinOp,
 ) -> Result<Expr, String> {
     match (
         left.ty.get_inner_type().deref(),
@@ -136,7 +112,7 @@ fn op_expr<F: Fn(Box<Expr>, Box<Expr>) -> ExprKind>(
         (Type::Int, Type::Int) => Ok(Expr::new(
             Rc::new(Type::Int),
             left.span.extend(&right.span),
-            func(Box::new(left), Box::new(right)),
+            ExprKind::BinOp(Box::new(left), Box::new(right), op),
         )),
         _ => Err(format!(
             "Arithmetic ops only for ints, got {} and {}",
@@ -150,55 +126,72 @@ impl Expr {
     pub fn int(val: i128, span: Span) -> Self {
         Expr::new(Rc::new(Type::Int), span, ExprKind::Int(val))
     }
+    pub fn bin_op(self, other: Expr, op: BinOp, bool_ty: Rc<Type>) -> Result<Self, Error> {
+        match op {
+            BinOp::Add => self.add(other),
+            BinOp::Mul => self.mul(other),
+            BinOp::Sub => self.sub(other),
+            BinOp::Div => self.div(other),
+            BinOp::Pow => self.pow(other),
+            BinOp::And => self.and(other, bool_ty),
+            BinOp::Or => self.or(other, bool_ty),
+            BinOp::Eq => self.eq(other, bool_ty),
+            BinOp::NotEq => self.not_eq(other, bool_ty),
+            BinOp::Gr => self.gr(other, bool_ty),
+            BinOp::GrOrEq => self.gr_or_eq(other, bool_ty),
+            BinOp::Le => self.le(other, bool_ty),
+            BinOp::LeOrEq => self.le_or_eq(other, bool_ty),
+        }
+    }
     pub fn add(self, other: Expr) -> Result<Self, Error> {
         let span = self.span.extend(&other.span);
-        op_expr(self, other, ExprKind::Add).map_err(|s| Error::Custom(span, s, "-here".to_string()))
+        op_expr(self, other, BinOp::Add).map_err(|s| Error::Custom(span, s, "-here".to_string()))
     }
     pub fn mul(self, other: Expr) -> Result<Self, Error> {
         let span = self.span.extend(&other.span);
-        op_expr(self, other, ExprKind::Mul).map_err(|s| Error::Custom(span, s, "-here".to_string()))
+        op_expr(self, other, BinOp::Mul).map_err(|s| Error::Custom(span, s, "-here".to_string()))
     }
     pub fn sub(self, other: Expr) -> Result<Self, Error> {
         let span = self.span.extend(&other.span);
-        op_expr(self, other, ExprKind::Sub).map_err(|s| Error::Custom(span, s, "-here".to_string()))
+        op_expr(self, other, BinOp::Sub).map_err(|s| Error::Custom(span, s, "-here".to_string()))
     }
     pub fn div(self, other: Expr) -> Result<Self, Error> {
         let span = self.span.extend(&other.span);
-        op_expr(self, other, ExprKind::Div).map_err(|s| Error::Custom(span, s, "-here".to_string()))
+        op_expr(self, other, BinOp::Div).map_err(|s| Error::Custom(span, s, "-here".to_string()))
     }
     pub fn pow(self, other: Expr) -> Result<Self, Error> {
         let span = self.span.extend(&other.span);
-        op_expr(self, other, ExprKind::Pow).map_err(|s| Error::Custom(span, s, "-here".to_string()))
+        op_expr(self, other, BinOp::Pow).map_err(|s| Error::Custom(span, s, "-here".to_string()))
     }
     pub fn and(self, other: Expr, bool_ty: Rc<Type>) -> Result<Self, Error> {
-        logical_op(self, other, bool_ty, ExprKind::And)
+        logical_op(self, other, bool_ty, BinOp::And)
     }
     pub fn or(self, other: Expr, bool_ty: Rc<Type>) -> Result<Self, Error> {
-        logical_op(self, other, bool_ty, ExprKind::Or)
+        logical_op(self, other, bool_ty, BinOp::Or)
     }
     pub fn eq(self, other: Expr, bool_ty: Rc<Type>) -> Result<Self, Error> {
         let span = self.span.extend(&other.span);
-        compare_op(self, other, bool_ty, ExprKind::Eq).map_err(|s| Error::Custom(span, s, "-here".to_string()))
+        compare_op(self, other, bool_ty, BinOp::Eq).map_err(|s| Error::Custom(span, s, "-here".to_string()))
     }
     pub fn not_eq(self, other: Expr, bool_ty: Rc<Type>) -> Result<Self, Error> {
         let span = self.span.extend(&other.span);
-        compare_op(self, other, bool_ty, ExprKind::NotEq).map_err(|s| Error::Custom(span, s, "-here".to_string()))
+        compare_op(self, other, bool_ty, BinOp::NotEq).map_err(|s| Error::Custom(span, s, "-here".to_string()))
     }
     pub fn gr(self, other: Expr, bool_ty: Rc<Type>) -> Result<Self, Error> {
         let span = self.span.extend(&other.span);
-        compare_op(self, other, bool_ty, ExprKind::Gr).map_err(|s| Error::Custom(span, s, "-here".to_string()))
+        compare_op(self, other, bool_ty, BinOp::Gr).map_err(|s| Error::Custom(span, s, "-here".to_string()))
     }
     pub fn gr_or_eq(self, other: Expr, bool_ty: Rc<Type>) -> Result<Self, Error> {
         let span = self.span.extend(&other.span);
-        compare_op(self, other, bool_ty, ExprKind::GrOrEq).map_err(|s| Error::Custom(span, s, "-here".to_string()))
+        compare_op(self, other, bool_ty, BinOp::GrOrEq).map_err(|s| Error::Custom(span, s, "-here".to_string()))
     }
     pub fn le(self, other: Expr, bool_ty: Rc<Type>) -> Result<Self, Error> {
         let span = self.span.extend(&other.span);
-        compare_op(self, other, bool_ty, ExprKind::Le).map_err(|s| Error::Custom(span, s, "-here".to_string()))
+        compare_op(self, other, bool_ty, BinOp::Le).map_err(|s| Error::Custom(span, s, "-here".to_string()))
     }
     pub fn le_or_eq(self, other: Expr, bool_ty: Rc<Type>) -> Result<Self, Error> {
         let span = self.span.extend(&other.span);
-        compare_op(self, other, bool_ty, ExprKind::LeOrEq).map_err(|s| Error::Custom(span, s, "-here".to_string()))
+        compare_op(self, other, bool_ty, BinOp::LeOrEq).map_err(|s| Error::Custom(span, s, "-here".to_string()))
     }
     pub fn dot(self, name: String, ctx: &Context<'_, Object>, span: Span) -> Result<Self, Error> {
         match self.kind {
@@ -220,29 +213,23 @@ impl Expr {
     }
 }
 
-fn logical_op<F>(left: Expr, right: Expr, bool_ty: Rc<Type>, f: F) -> Result<Expr, Error>
-where
-    F: Fn(Box<Expr>, Box<Expr>) -> ExprKind,
-{
+fn logical_op(left: Expr, right: Expr, _bool_ty: Rc<Type>, op: BinOp) -> Result<Expr, Error> {
     match left.ty.deref() {
         Type::Type => Ok(Expr::new(
             Type::typ(),
             left.span.extend(&right.span),
-            f(Box::new(left), Box::new(right)),
+            ExprKind::BinOp(Box::new(left), Box::new(right), op),
         )),
         _ => unimplemented!(),
     }
 }
 
-fn compare_op<F>(left: Expr, right: Expr, bool_ty: Rc<Type>, f: F) -> Result<Expr, String>
-where
-    F: Fn(Box<Expr>, Box<Expr>) -> ExprKind,
-{
+fn compare_op(left: Expr, right: Expr, bool_ty: Rc<Type>, op: BinOp) -> Result<Expr, String> {
     match left.ty.deref() {
         Type::Type => return Ok(Expr::new(
             Type::typ(),
             left.span.extend(&right.span),
-            f(Box::new(left), Box::new(right)),
+            ExprKind::BinOp(Box::new(left), Box::new(right), op),
         )),
         _ => { },
     }
@@ -254,7 +241,7 @@ where
         (Type::Int, Type::Int) => Ok(Expr::new(
             bool_ty,
             left.span.extend(&right.span),
-            f(Box::new(left), Box::new(right)),
+            ExprKind::BinOp(Box::new(left), Box::new(right), op),
         )),
         _ => Err(format!(
             "Compare ops only for ints, got {} and {}",
@@ -263,22 +250,20 @@ where
     }
 }
 
-fn parse_binary_op<F>(
+fn parse_binary_op(
     l: &Token,
     r: &Token,
     span: Span,
     ctx: &Context<'_, Object>,
     g: &mut HashMap<String, Option<Rc<Type>>>,
     expected: Option<Rc<Type>>,
-    f: F,
+    op: BinOp,
 ) -> Result<Option<Expr>, Error>
-where
-    F: Fn(Expr, Expr) -> Result<Expr, Error>,
 {
     let left = parse_expr(l, ctx, g, None)?;
     let right = parse_expr(r, ctx, g, None)?;
-    match (left, right) {
-        (Some(l), Some(r)) => f(l, r).map(Some),
+    let (l, r) = match (left, right) {
+        (Some(l), Some(r)) => (l, r),
         (Some(_l), None) => unimplemented!(),
         (None, Some(_r)) => unimplemented!(),
         (None, None) => {
@@ -286,9 +271,10 @@ where
                 .ok_or_else(|| Error::cannot_infer_type(span))?;
             let right = parse_expr(r, ctx, g, expected.clone())?
                 .ok_or_else(|| Error::cannot_infer_type(span))?;
-            f(left, right).map(Some)
+            (left, right)
         }
-    }
+    };
+    Expr::bin_op(l, r, op, ctx.find_ty("Bool").unwrap()).map(Some)
 }
 
 fn assert_types_equal(this: &Type, expected: Option<Rc<Type>>, span: Span) -> Result<(), Error> {
@@ -333,7 +319,7 @@ pub fn parse_expr(
 ) -> Result<Option<Expr>, Error> {
     match &token.ast {
         Ast::Int(i) => check_type(Expr::int(*i, token.span), expected),
-        Ast::Add(l, r) => {
+        Ast::BinOp(l, r, op) => {
             match parse_binary_op(
                 l.as_ref(),
                 r.as_ref(),
@@ -341,154 +327,12 @@ pub fn parse_expr(
                 ctx,
                 g,
                 expected.clone(),
-                Expr::add,
+                op.clone(),
             )? {
                 Some(e) => check_type(e, expected),
                 None => Ok(None),
             }
         }
-        Ast::Sub(l, r) => {
-            match parse_binary_op(
-                l.as_ref(),
-                r.as_ref(),
-                token.span,
-                ctx,
-                g,
-                expected.clone(),
-                Expr::sub,
-            )? {
-                Some(e) => check_type(e, expected),
-                None => Ok(None),
-            }
-        }
-        Ast::Mul(l, r) => {
-            match parse_binary_op(
-                l.as_ref(),
-                r.as_ref(),
-                token.span,
-                ctx,
-                g,
-                expected.clone(),
-                Expr::mul,
-            )? {
-                Some(e) => check_type(e, expected),
-                None => Ok(None),
-            }
-        }
-        Ast::Div(l, r) => {
-            match parse_binary_op(
-                l.as_ref(),
-                r.as_ref(),
-                token.span,
-                ctx,
-                g,
-                expected.clone(),
-                Expr::div,
-            )? {
-                Some(e) => check_type(e, expected),
-                None => Ok(None),
-            }
-        }
-        Ast::Pow(l, r) => {
-            match parse_binary_op(
-                l.as_ref(),
-                r.as_ref(),
-                token.span,
-                ctx,
-                g,
-                expected.clone(),
-                Expr::pow,
-            )? {
-                Some(e) => check_type(e, expected),
-                None => Ok(None),
-            }
-        }
-        Ast::And(l, r) => {
-            match parse_binary_op(
-                l.as_ref(),
-                r.as_ref(),
-                token.span,
-                ctx,
-                g,
-                expected.clone(),
-                |x, y| Expr::and(x, y, ctx.find_ty("Bool").unwrap()),
-            )? {
-                Some(e) => check_type(e, expected),
-                None => Ok(None),
-            }
-        }
-        Ast::Or(l, r) => {
-            match parse_binary_op(
-                l.as_ref(),
-                r.as_ref(),
-                token.span,
-                ctx,
-                g,
-                expected.clone(),
-                |x, y| Expr::or(x, y, ctx.find_ty("Bool").unwrap()),
-            )? {
-                Some(e) => check_type(e, expected),
-                None => Ok(None),
-            }
-        }
-        Ast::Gr(l, r) => {
-            match parse_binary_op(
-                l.as_ref(),
-                r.as_ref(),
-                token.span,
-                ctx,
-                g,
-                expected.clone(),
-                |x, y| Expr::gr(x, y, ctx.find_ty("Bool").unwrap()),
-            )? {
-                Some(e) => check_type(e, expected),
-                None => Ok(None),
-            }
-        }
-        Ast::Le(l, r) => {
-            match parse_binary_op(
-                l.as_ref(),
-                r.as_ref(),
-                token.span,
-                ctx,
-                g,
-                expected.clone(),
-                |x, y| Expr::le(x, y, ctx.find_ty("Bool").unwrap()),
-            )? {
-                Some(e) => check_type(e, expected),
-                None => Ok(None),
-            }
-        }
-        Ast::GrEq(l, r) => {
-            match parse_binary_op(
-                l.as_ref(),
-                r.as_ref(),
-                token.span,
-                ctx,
-                g,
-                expected.clone(),
-                |x, y| Expr::gr_or_eq(x, y, ctx.find_ty("Bool").unwrap()),
-            )? {
-                Some(e) => check_type(e, expected),
-                None => Ok(None),
-            }
-        }
-        Ast::LeEq(l, r) => {
-            match parse_binary_op(
-                l.as_ref(),
-                r.as_ref(),
-                token.span,
-                ctx,
-                g,
-                expected.clone(),
-                |x, y| Expr::le_or_eq(x, y, ctx.find_ty("Bool").unwrap()),
-            )? {
-                Some(e) => check_type(e, expected),
-                None => Ok(None),
-            }
-        }
-        Ast::Eq(_, _) => unimplemented!(),
-        Ast::NotEq(_, _) => unimplemented!(),
         Ast::Neg(t) => {
             let expr = parse_expr(t, ctx, &mut HashMap::new(), Some(Rc::new(Type::Int)))?; // TODO
             match expr {

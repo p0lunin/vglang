@@ -1,4 +1,4 @@
-use crate::common::{Context, Error, HasName, Searchable, SearchableByPath, Spanned};
+use crate::common::{Context, Error, HasName, Searchable, SearchableByPath, Spanned, BinOp};
 use crate::ir::objects::{
     Arg, DataDef, DataVariant, FunctionDefinition, FunctionObject, Object, Var,
 };
@@ -84,18 +84,12 @@ impl Interpreter<'_> {
             ExprKind::DataVariant(v) => {
                 self.eval_func(vec![], Callable::DataVariant(v.clone()), v.get_type())
             }
-            ExprKind::Add(l, r) => self.eval(l, bc_ctx).and_then(|left| {
-                self.eval(r, bc_ctx)
-                    .and_then(|right| ByteCode::add(left, right))
-            }),
-            ExprKind::Le(l, r) => self.eval(l, bc_ctx).and_then(|left| {
-                self.eval(r, bc_ctx)
-                    .and_then(|right| ByteCode::le(left, right).map(|x| into_to_bool(x, &self.ctx)))
-            }),
-            ExprKind::Gr(l, r) => self.eval(l, bc_ctx).and_then(|left| {
-                self.eval(r, bc_ctx)
-                    .and_then(|right| ByteCode::gr(left, right).map(|x| into_to_bool(x, &self.ctx)))
-            }),
+            ExprKind::BinOp(l, r, op) => {
+                self.eval(l, bc_ctx).and_then(|left| {
+                    self.eval(r, bc_ctx)
+                        .and_then(|right| ByteCode::bin_op(left, right, op.clone(), &self.ctx))
+                })
+            }
             _ => unimplemented!(),
         }
     }
@@ -274,7 +268,7 @@ impl ByteCode {
     }
 }
 
-fn into_to_bool(bc: ByteCode, ctx: &Context<Object>) -> ByteCode {
+fn int_to_bool(bc: ByteCode, ctx: &Context<Object>) -> ByteCode {
     match bc {
         ByteCode::Int(0) => match ctx.find_by_path(&Path::Path("Bool".into(), Box::new(Path::Place("False".into())))) {
             Some(Object::EnumVariant(v)) => ByteCode::DataVariant(v, vec![]),
@@ -304,6 +298,15 @@ impl Display for ByteCode {
 }
 
 impl ByteCode {
+    fn bin_op(self, other: Self, op: BinOp, cx: &Context<Object>) -> Result<Self, Error> {
+        match op {
+            BinOp::Add => self.add(other),
+            BinOp::Le => self.le(other).map(|x| int_to_bool(x, cx)),
+            BinOp::Gr => self.gr(other).map(|x| int_to_bool(x, cx)),
+            _ => unimplemented!()
+        }
+    }
+
     fn add(self, other: Self) -> Result<Self, Error> {
         match (self, other) {
             (ByteCode::Int(i), ByteCode::Int(i2)) => Ok(ByteCode::Int(i + i2)),

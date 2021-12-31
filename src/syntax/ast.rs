@@ -1,4 +1,4 @@
-use crate::common::{Span, Spanned};
+use crate::common::{Span, Spanned, BinOp};
 use std::fmt::{Debug, Display, Formatter};
 use std::ops::Deref;
 
@@ -30,19 +30,7 @@ impl Token {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Ast {
-    Add(Box<Token>, Box<Token>),
-    Sub(Box<Token>, Box<Token>),
-    Mul(Box<Token>, Box<Token>),
-    Div(Box<Token>, Box<Token>),
-    Pow(Box<Token>, Box<Token>),
-    And(Box<Token>, Box<Token>),
-    Or(Box<Token>, Box<Token>),
-    Gr(Box<Token>, Box<Token>),
-    Le(Box<Token>, Box<Token>),
-    GrEq(Box<Token>, Box<Token>),
-    LeEq(Box<Token>, Box<Token>),
-    Eq(Box<Token>, Box<Token>),
-    NotEq(Box<Token>, Box<Token>),
+    BinOp(Box<Token>, Box<Token>, BinOp),
     Neg(Box<Token>),
     Parenthesis(Box<Token>),
     Int(i128),
