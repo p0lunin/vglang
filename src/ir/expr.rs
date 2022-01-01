@@ -1,7 +1,7 @@
 use crate::common::{Context, Error, Searchable, SearchableByPath, Span, Spanned, BinOp};
 use crate::ir::objects::{DataVariant, Object, Var};
 use crate::ir::types::base_types::Function;
-use crate::ir::types::{Type, Generic};
+use crate::ir::types::{Type, Generic, Concrete};
 use crate::syntax::ast::{Ast, Pattern, Token};
 use crate::{ir, syntax, Implementations, Interpreter};
 use std::collections::HashMap;
@@ -70,7 +70,7 @@ impl Display for ExprKind {
         }
     }
 }
-
+/*
 impl Expr {
     pub fn convert_to_type(self, ctx: &Context<'_, Object>) -> Result<Rc<Type>, Error> {
         match self.kind {
@@ -80,7 +80,7 @@ impl Expr {
             ExprKind::Neg(_) => Ok(Rc::new(Type::Expr(self))),
             ExprKind::Ident(i) => match ctx.find(i.as_str()).unwrap() {
                 Object::Type(t) => Ok(t.def.clone()),
-                Object::Enum(e) => Ok(Rc::new(Type::Data(e.ty.clone()))),
+                Object::Enum(e) => unimplemented!(),
                 _ => unimplemented!(),
             },
             ExprKind::Application(_, _) => Ok(Rc::new(Type::Expr(self))),
@@ -100,7 +100,7 @@ impl Expr {
         }
     }
 }
-
+*/
 fn op_expr(
     left: Expr,
     right: Expr,
@@ -275,7 +275,7 @@ fn parse_binary_op(
             (left, right)
         }
     };
-    Expr::bin_op(l, r, op, ctx.find_ty("Bool").unwrap()).map(Some)
+    Expr::bin_op(l, r, op, ctx.find_bool()).map(Some)
 }
 
 fn assert_types_equal(this: &Type, expected: Option<Rc<Type>>, span: Span) -> Result<(), Error> {
@@ -309,7 +309,14 @@ pub fn parse_type(token: &Token, ctx: &Context<'_, Object>, impls: &Implementati
 }
 
 pub fn interpret_expr_as_ty(e: Expr, ctx: &Context<Object>, impls: &Implementations) -> Result<Rc<Type>, Error> {
-    match e.kind {
+    let interpreter = Interpreter::new(&impls.functions, ctx);
+    let e2 = interpreter.eval(&e, &Context::new())?;
+    match e2 {
+        ByteCode::Type(ty) => Ok(ty.clone()),
+        ByteCode::DataType(ty) => Ok(Rc::new(Type::Data(ty))),
+        _ => unimplemented!()
+    }
+    /*match e.kind {
         ExprKind::Application(_, _) => {
             let interpreter = Interpreter::new(&impls.functions, ctx);
             let e2 = interpreter.eval(&e, &Context::new())?;
@@ -322,7 +329,7 @@ pub fn interpret_expr_as_ty(e: Expr, ctx: &Context<Object>, impls: &Implementati
             interpret_ty(ty, ctx, impls)
         }
         _ => e.convert_to_type(ctx)
-    }
+    }*/
 }
 
 fn interpret_ty(ty: Rc<Type>, ctx: &Context<Object>, impls: &Implementations) -> Result<Rc<Type>, Error> {
@@ -365,7 +372,6 @@ pub fn parse_expr(
     g: &mut HashMap<String, Option<Rc<Type>>>,
     expected: Option<Rc<Type>>,
 ) -> Result<Option<Expr>, Error> {
-    dbg!(token);
     match &token.ast {
         Ast::Int(i) => check_type(Expr::int(*i, token.span), expected, ctx),
         Ast::BinOp(l, r, op) => {
@@ -378,7 +384,9 @@ pub fn parse_expr(
                 expected.clone(),
                 op.clone(),
             )? {
-                Some(e) => check_type(e, expected, ctx),
+                Some(e) => {
+                    check_type(e, expected, ctx)
+                },
                 None => Ok(None),
             }
         }
@@ -411,7 +419,9 @@ pub fn parse_expr(
                     Some(Some(t)) => Expr::new(t.clone(), token.span, ExprKind::Ident(i.clone())),
                     Some(None) => unreachable!(),
                     None => match ctx.find(i.as_str()) {
-                        Some(o) => Expr::new(o.get_type(), token.span, ExprKind::Ident(i.clone())),
+                        Some(o) => {
+                            Expr::new(o.get_type(), token.span, ExprKind::Ident(i.clone()))
+                        },
                         None => {
                             return Err(Error::Custom(
                                 token.span,
@@ -422,49 +432,52 @@ pub fn parse_expr(
                     },
                 },
             };
-            let expr = monomorphize(expr, expected.clone());
+            let expr = infer(expr, expected.clone());
             check_type(expr, expected, ctx)
         }
-        Ast::Val => check_type(
-            Expr::new(Type::typ(), token.span, ExprKind::Type(Type::unknown())),
-            expected,
-            ctx
-        ),
+        Ast::Val => {
+            todo!();
+            check_type(
+                Expr::new(Type::typ(), token.span, ExprKind::Type(Type::unknown())),
+                expected,
+                ctx
+            )
+        },
         Ast::Slice(_) => unimplemented!(),
         Ast::Implication(l, r) => {
             let exp = Some(Type::typ());
             let left = parse_expr(l, ctx, g, exp.clone())?
-                .ok_or_else(|| Error::cannot_infer_type(token.span))?
-                .convert_to_type(ctx)?;
-            let left_types = left.types_in_scope();
+                .ok_or_else(|| Error::cannot_infer_type(token.span))?;
+            /*let left_types = left.types_in_scope();
             let new_ctx = Context {
                 objects: left_types
                     .into_iter()
                     .map(|(name, ty)| Object::Var(Rc::new(Var { name, ty })))
                     .collect(),
                 parent: Some(ctx),
-            };
-            let right = parse_expr(r, &new_ctx, g, exp.clone())?
+            };*/
+            let right = parse_expr(r, ctx, g, exp.clone())?
                 .ok_or_else(|| Error::cannot_infer_type(token.span))?;
             let expr = Expr::new(
                 Type::typ(),
                 token.span,
                 ExprKind::Type(Rc::new(Type::Function(Function {
-                    get_value: left,
-                    return_value: right.convert_to_type(ctx)?,
+                    get_value: Rc::new(Type::Expr(left)),
+                    return_value: Rc::new(Type::Expr(right))
                 }))),
             );
             check_type(expr, expected, ctx)
         }
         Ast::Named(name, ty) => {
-            let ty = parse_expr(ty, ctx, g, None)?
+            /*let ty = parse_expr(ty, ctx, g, None)?
                 .unwrap()
                 .convert_to_type(ctx)?; // TODO
             Ok(Some(Expr::new(
                 Type::typ(),
                 token.span,
                 ExprKind::Type(Rc::new(Type::Named(name.clone().inner(), ty))),
-            )))
+            )))*/
+            unimplemented!()
         }
         Ast::CallFunction(left, right) => {
             let right = parse_expr(right.as_ref(), ctx, g, None)?;
@@ -476,7 +489,7 @@ pub fn parse_expr(
                         g,
                         Some(Rc::new(Type::Function(Function {
                             get_value: right.ty.clone(),
-                            return_value: expected.clone().unwrap_or_else(|| Rc::new(Type::Never)),
+                            return_value: expected.clone().unwrap_or_else(|| Rc::new(Type::Unknown(None))),
                         }))),
                     )?;
                     match left {
@@ -505,7 +518,7 @@ pub fn parse_expr(
             Ast::Ident(i) => {
                 let left = parse_expr(l, ctx, g, None)?.unwrap();
                 let expr = left.dot(i.clone(), ctx, token.span)?;
-                let ty = monomorphize(expr, expected);
+                let ty = infer(expr, expected);
                 Ok(Some(ty))
             }
             _ => unimplemented!(),
@@ -561,24 +574,74 @@ pub fn parse_expr(
     }
 }
 
-fn monomorphize(mut expr: Expr, expected: Option<Rc<Type>>) -> Expr {
+fn infer(mut expr: Expr, expected: Option<Rc<Type>>) -> Expr {
     let expected = match expected {
         Some(ex) => ex,
         None => return expr,
     };
-    expr.ty = monomorphize_ty(expr.ty.clone(), expected);
+    expr.ty = clarify_generics(expr.ty.clone(), expected.clone());
+    expr.ty = infer_ty(expr.ty.clone(), expected);
     expr
 }
 
-fn monomorphize_ty(ty: Rc<Type>, expected: Rc<Type>) -> Rc<Type> {
+fn infer_ty(ty: Rc<Type>, expected: Rc<Type>) -> Rc<Type> {
     match (ty.as_ref(), expected.as_ref()) {
-        (Type::Function(f), Type::Function(ef)) => match f.get_value.as_ref() {
-            Type::Generic(g) => {
-                return ty.clone().update_set_generic_func(g, &ef.get_value);
-            }
-            _ => ty.clone(),
+        (Type::Unknown(_), _) => expected.clone(),
+        (Type::Function(f), Type::Function(ef)) => {
+            Rc::new(Type::Function(Function {
+                get_value: infer_ty(f.get_value.clone(), ef.get_value.clone()),
+                return_value: infer_ty(f.return_value.clone(), ef.return_value.clone()),
+            }))
+        },
+        (Type::Data(d), Type::Data(ed)) => {
+            Rc::new(Type::Data(Concrete::new(
+                d.base.clone(),
+                d.generics.iter().zip(ed.generics.iter()).map(|(ty, ety)| {
+                    match ty.as_ref() {
+                        Type::Unknown(_) => ety.clone(),
+                        _ => ty.clone()
+                    }
+                }).collect()
+            )))
         },
         _ => ty.clone(),
+    }
+}
+
+fn clarify_generics(mut ty: Rc<Type>, expected: Rc<Type>) -> Rc<Type> {
+    let gens = {
+        let mut gens = HashMap::new();
+        generics_map(ty.clone(), expected, &mut gens);
+        gens
+    };
+    for (gen, gen_ty) in gens {
+        ty = ty.update_set_generic_func(&gen, &gen_ty);
+    }
+    ty
+}
+
+fn generics_map(ty: Rc<Type>, expected: Rc<Type>, gens: &mut HashMap<String, Rc<Type>>) {
+    match (ty.as_ref(), expected.as_ref()) {
+        (Type::Unknown(Some(g)), _) => {
+            if !gens.contains_key(g.name.as_ref()) {
+                gens.insert(g.name.as_ref().clone(), expected.clone());
+            }
+        },
+        (Type::Generic(g), _) => {
+            if !gens.contains_key(g.name.as_ref()) {
+                gens.insert(g.name.as_ref().clone(), expected.clone());
+            }
+        },
+        (Type::Function(f), Type::Function(ef)) => {
+            generics_map(f.get_value.clone(), ef.get_value.clone(), gens);
+            generics_map(f.return_value.clone(), ef.return_value.clone(), gens);
+        },
+        (Type::Data(d), Type::Data(ed)) => {
+            d.generics.iter().zip(ed.generics.iter()).for_each(|(g, ge)| {
+                generics_map(g.clone(), ge.clone(), gens)
+            })
+        }
+        _ => { },
     }
 }
 
@@ -692,19 +755,20 @@ fn create_scope_objects<'a>(
         Pattern::Variant(path, pats) => match top.find_by_path(path) {
             Some(Object::EnumVariant(v)) => {
                 let v = {
-                    let ty_gens = match pattern_type.as_ref() {
-                        Type::Data(d) => d.generics.as_slice(),
-                        _ => unreachable!()
+                    let concrete = match pattern_type.as_ref() {
+                        Type::Data(d) => d,
+                        x => {
+                            unreachable!()
+                        }
                     };
                     let mut v = (*v).clone();
-                    for (gen, gen_ty) in ty_gens.iter() {
+                    for (gen, gen_ty) in concrete.base.generics.iter().zip(concrete.generics.iter()) {
                         v = v.update_generic(
-                            &Generic { name: Spanned::new(gen.clone(), Span::new(0, 0)) },
+                            gen,
                             gen_ty
                         );
                     }
-                    dbg!(&v);
-                    Rc::new(v)
+                    v
                 };
                 match v.data.len() == pats.len() {
                     true => pats.iter().zip(v.data.iter()).for_each(|(pat, ty)| {

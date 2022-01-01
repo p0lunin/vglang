@@ -4,6 +4,7 @@ use crate::ir::objects::{Arg, Object};
 use crate::ir::types::Type;
 use std::fmt::{Display, Formatter};
 use std::rc::Rc;
+use crate::ir::types::base_types::Function;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct FunctionDefinition {

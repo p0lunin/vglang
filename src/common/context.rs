@@ -1,7 +1,7 @@
 use crate::syntax::ast::Path;
 use std::ops::Deref;
 use crate::ir::objects::Object;
-use crate::ir::types::Type;
+use crate::ir::types::{Type, Concrete};
 use std::rc::Rc;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -20,15 +20,23 @@ impl<'a, T: 'a> Context<'a, T> {
 }
 
 impl<'a> Context<'a, Object> {
-    pub fn find_ty(&self, name: &str) -> Option<Rc<Type>> {
+    /*pub fn find_ty(&self, name: &str) -> Option<Rc<Type>> {
         let obj = self.find(name)?;
         match obj {
-            Object::EnumDecl(e) => { Some(Rc::new(Type::Data(e))) }
-            Object::Enum(e) => { Some(Rc::new(Type::Data(e.ty.clone()))) }
+            Object::EnumDecl(e) => { Some(e.as_ty()) }
+            Object::Enum(e) => { Some(e.as_ty()) }
             Object::Type(ty) => {
                 Some(ty.def.clone())
             }
             _ => None
+        }
+    }*/
+    pub fn find_bool(&self) -> Rc<Type> {
+        let obj = self.find("Bool").unwrap();
+        match obj {
+            Object::EnumDecl(e) => { Rc::new(Type::Data(Concrete::base(e))) }
+            Object::Enum(e) => { Rc::new(Type::Data(Concrete::base(e.ty.clone()))) }
+            _ => unreachable!()
         }
     }
 }

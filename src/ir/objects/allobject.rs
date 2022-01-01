@@ -40,13 +40,13 @@ impl Searchable for Object {
 impl Object {
     pub fn get_type(&self) -> Rc<Type> {
         match self {
-            Object::FunctionDefinition(f) => f.ftype.clone(),
+            Object::FunctionDefinition(f) => f.ftype.expr_ty().clone(),
             Object::Type(_t) => Type::typ(),
             Object::Arg(a) => a.ty.clone(),
-            Object::Enum(e) => e.ty(),
-            Object::EnumVariant(e) => Rc::new(Type::Data(e.dty.clone())),
+            Object::Enum(e) => e.as_ty(),
+            Object::EnumVariant(e) => e.get_type(),
             Object::Var(v) => v.ty.clone(),
-            Object::EnumDecl(e) => e.ty(),
+            Object::EnumDecl(e) => e.as_ty(),
         }
     }
 }

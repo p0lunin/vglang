@@ -6,13 +6,14 @@ use crate::syntax::ast;
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
 use std::rc::Rc;
+use crate::ir::types::Concrete;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Type {
     Function(Function),
-    Unknown,
+    Unknown(Option<Generic>),
     Int,
-    Data(Rc<DataType>),
+    Data(Concrete<DataType>),
     Type,
     Never,
     Generic(Generic),
@@ -38,10 +39,10 @@ impl Display for Generic {
 }
 
 impl Type {
-    pub fn update_set_generic_func(self: Rc<Type>, g: &Generic, ty: &Rc<Type>) -> Rc<Type> {
+    pub fn update_set_generic_func(self: Rc<Type>, g: &str, ty: &Rc<Type>) -> Rc<Type> {
         match self.as_ref() {
             Type::Generic(gen) => {
-                if gen == g {
+                if gen.name.as_str() == g {
                     ty.clone()
                 } else {
                     self
@@ -60,10 +61,31 @@ impl Type {
                 }
             }
             Type::Data(d) => {
-                let gens = d.generics.iter().map(|(n, x)| (n.clone(), x.clone().update_set_generic_func(g, ty))).collect();
-                Rc::new(Type::Data(Rc::new(DataType::new(d.name.clone(), gens))))
+                let gens = d.generics
+                    .iter()
+                    .map(|gen| gen.clone().update_set_generic_func(g, ty)).collect();
+                Rc::new(Type::Data(Concrete::new(d.base.clone(), gens)))
             }
             _ => self,
+        }
+    }
+
+    pub fn expr_ty(self: &Rc<Self>) -> Rc<Type> {
+        match self.as_ref() {
+            Type::Generic(g) => Rc::new(Type::Unknown(Some(g.clone()))),
+            Type::Function(f) => {
+                Rc::new(Type::Function(Function {
+                    get_value: f.get_value.expr_ty(),
+                    return_value: f.return_value.expr_ty()
+                }))
+            }
+            Type::Data(d) => {
+                Rc::new(Type::Data(Concrete::new(
+                    d.base.clone(),
+                    d.generics.iter().map(|g| g.expr_ty()).collect()
+                )))
+            }
+            _ => self.clone()
         }
     }
 }
@@ -72,6 +94,7 @@ impl Type {
     pub fn is_part_of(&self, other: &Type) -> bool {
         match (self, other) {
             (_, Type::Never) => true,
+            (_, Type::Unknown(_)) => true,
             (Type::Function(l), Type::Function(r)) => l.is_part_of(r),
             (Type::Int, Type::Int) => true,
             (_, Type::Type) => true,
@@ -80,7 +103,10 @@ impl Type {
             (Type::Expr(e), t) => e.ty.is_part_of(t),
             (t, Type::Named(_, ty)) => t.is_part_of(ty),
             (Type::Named(_, t), ty) => t.is_part_of(ty),
-            (Type::Data(d1), Type::Data(d2)) => d1 == d2,
+            (Type::Data(d1), Type::Data(d2)) => {
+                d1.base == d2.base &&
+                    d1.generics.iter().zip(d2.generics.iter()).all(|(x, y)| x.is_part_of(y))
+            },
             _ => false,
         }
     }
@@ -100,7 +126,7 @@ impl Type {
     }
 
     pub fn unknown() -> Rc<Type> {
-        Rc::new(Type::Unknown)
+        Rc::new(Type::Unknown(None))
     }
 
     pub fn typ() -> Rc<Type> {
@@ -129,7 +155,7 @@ impl Display for Type {
             Type::Generic(g) => Display::fmt(g, f),
             Type::Data(g) => Display::fmt(g, f),
             Type::Never => f.write_str("Never"),
-            Type::Unknown => f.write_str("Unknown"),
+            Type::Unknown(_) => f.write_str("_"),
             Type::Expr(e) => Display::fmt(e, f),
             Type::Named(n, _) => Display::fmt(n, f),
         }

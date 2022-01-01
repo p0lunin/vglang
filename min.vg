@@ -50,9 +50,9 @@ nsert_sorted: Int -> List Int -> List Int
 nsert_sorted x xs = case xs of
     List.Nil => cons x nil
     List.Cons y xs' => case x < y of
-        Bool.True => cons x (cons y nil)
+        Bool.True => x `cons` (cons y xs')
         Bool.False => y `cons` (nsert_sorted x xs') ?>?>
-/*
+
 sort_inner: List Int -> List Int -> List Int
 sort_inner xs ys = case xs of
     List.Nil => ys
@@ -60,7 +60,12 @@ sort_inner xs ys = case xs of
 
 sort: List Int -> List Int
 sort xs = sort_inner xs nil
-*/
+
+gen: Int -> List Int
+gen x = case x == 0 of
+    Bool.True => nil
+    Bool.False => cons x (gen (x - 1)) ?>
+
 /*
 trait Foo a where
     bar: a -> a

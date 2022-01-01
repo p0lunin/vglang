@@ -189,7 +189,8 @@ peg::parser! { grammar lang() for str {
         --
         x:(@) _ "+" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::BinOp(Box::new(x), Box::new(y), BinOp::Add)) }
         x:(@) _ "-" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::BinOp(Box::new(x), Box::new(y), BinOp::Sub)) }
-        start:position!() inli(i) "-" inli(i) x:@ { Token::new(Span::new(start, x.span.end), Ast::Neg(Box::new(x))) }
+        // this parsed wrong in case of `variable - 1` expression, as Application(Neg(1))
+        // start:position!() inli(i) "-" inli(i) x:@ { Token::new(Span::new(start, x.span.end), Ast::Neg(Box::new(x))) }
         --
         x:(@) _ "*" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::BinOp(Box::new(x), Box::new(y), BinOp::Mul)) }
         x:(@) _ "/" inli(i) y:@ { Token::new(x.span.extend(&y.span), Ast::BinOp(Box::new(x), Box::new(y), BinOp::Div)) }

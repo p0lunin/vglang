@@ -2,34 +2,35 @@ use crate::common::{Context, Error};
 use crate::ir::objects::{Object, TypeObject};
 use crate::ir::parse_expr;
 use crate::ir::types::base_types::Function;
-use crate::ir::types::{Generic, Type};
+use crate::ir::types::{Generic, Type, Concrete};
 use crate::syntax::ast::{EnumDecl, EnumVariant, Token};
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::rc::Rc;
 use crate::ir::expr::interpret_expr_as_ty;
 use crate::Implementations;
+use itertools::Itertools;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct DataType {
     pub name: String,
-    pub generics: Vec<(String, Rc<Type>)>,
+    pub generics: Vec<Generic>,
 }
 
 impl DataType {
-    pub fn new(name: String, generics: Vec<(String, Rc<Type>)>) -> Self {
+    pub fn new(name: String, generics: Vec<Generic>) -> Self {
         DataType { name, generics }
     }
-    pub fn ty(self: &Rc<Self>) -> Rc<Type> {
+    pub fn as_ty(self: &Rc<Self>) -> Rc<Type> {
         data_ty(self.clone(), &self.generics)
     }
 }
 
-fn data_ty(ty: Rc<DataType>, generics: &[(String, Rc<Type>)]) -> Rc<Type> {
+fn data_ty<T>(ty: Rc<DataType>, generics: &[T]) -> Rc<Type> {
     match generics {
-        [] => Rc::new(Type::Data(ty)),
-        [(_, x), xs @ ..] => Rc::new(Type::Function(Function {
-            get_value: x.clone(),
+        [] => Rc::new(Type::Type),
+        [_, xs @ ..] => Rc::new(Type::Function(Function {
+            get_value: Rc::new(Type::Type),
             return_value: data_ty(ty, xs),
         })),
     }
@@ -42,9 +43,7 @@ impl Display for DataType {
             xs => {
                 f.write_str("(")?;
                 f.write_str(self.name.as_str())?;
-                xs.iter().for_each(|x| {
-                    write!(f, " <{}>:{}", x.0, x.1).unwrap();
-                });
+                f.write_fmt(format_args!("<{}>", self.generics.iter().map(|x| x.name.as_str()).join(", ")))?;
                 f.write_str(")")?;
                 Ok(())
             }
@@ -69,20 +68,16 @@ impl DataDef {
             name: name.inner(),
             generics: generics
                 .into_iter()
-                .map(|g| (g.name.val.clone(), Rc::new(Type::Generic(Generic::parse(g.inner())))))
+                .map(|g| Generic::parse(g.inner()))
                 .collect(),
         });
         let mut objects = ty
             .generics
             .iter()
-            .map(|(_, ty)| {
-                let name = match ty.as_ref() {
-                    Type::Generic(g) => &g.name,
-                    _ => unreachable!(),
-                };
+            .map(|x| {
                 Object::Type(Rc::new(TypeObject {
-                    name: name.as_str().to_string(),
-                    def: Rc::new(Type::Generic(Generic { name: name.clone() })),
+                    name: x.name.as_str().to_string(),
+                    def: Rc::new(Type::Generic(x.clone())),
                 }))
             })
             .collect::<Vec<_>>();
@@ -103,8 +98,8 @@ impl DataDef {
     pub fn get_field(&self, name: &str) -> Option<Rc<DataVariant>> {
         self.variants.iter().find(|v| v.name == name).map(Rc::clone)
     }
-    pub fn ty(&self) -> Rc<Type> {
-        self.ty.ty()
+    pub fn as_ty(&self) -> Rc<Type> {
+        self.ty.as_ty()
     }
 }
 
@@ -123,10 +118,16 @@ pub struct DataVariant {
 
 impl DataVariant {
     pub fn get_type(&self) -> Rc<Type> {
-        let mut ty = Rc::new(Type::Data(self.dty.clone()));
+        let mut ty = Rc::new(Type::Data(Concrete::new(
+            self.dty.clone(),
+            self.dty.generics.iter().map(|g| Rc::new(Type::Unknown(Some(g.clone())))).collect()
+        )));
         for t in self.data.iter().rev() {
             ty = Rc::new(Type::Function(Function {
-                get_value: t.clone(),
+                get_value: match t.as_ref() {
+                    Type::Generic(_) => Rc::new(Type::Never),
+                    _ => t.clone(),
+                },
                 return_value: ty,
             }))
         }
@@ -155,7 +156,7 @@ impl DataVariant {
 
     pub fn update_generic(mut self, gen: &Generic, ty: &Rc<Type>) -> Self {
         self.data.iter_mut().for_each(|x| {
-            *x = x.clone().update_set_generic_func(gen, ty);
+            *x = x.clone().update_set_generic_func(gen.name.as_str(), ty);
         });
         self
     }

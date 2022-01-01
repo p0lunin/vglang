@@ -82,8 +82,8 @@ fn main() {
 
     let mut interpreter = Interpreter::new(&f2, &ctx);
 
-    repl(">>", |d| match eval(&mut interpreter, &d) {
-        Ok(b) => b.to_string(),
+    repl(">> ", |d| match eval(&mut interpreter, &d) {
+        Ok(b) => b.print_value_string(),
         Err(e) => e,
     })
 }
