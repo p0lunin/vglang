@@ -33,7 +33,7 @@ gen_struct<a>: a -> (GenData a)
 gen_struct x = GenData.Build x
 
 gen_struct_int: Int -> (GenData Int)
-gen_struct_int x = gen_struct x
+gen_struct_int x = GenData.Build x
 
 gen_struct_int': Int -> (GenData Int)
 gen_struct_int' x = GenData.Build x
@@ -50,9 +50,9 @@ nsert_sorted: Int -> List Int -> List Int
 nsert_sorted x xs = case xs of
     List.Nil => cons x nil
     List.Cons y xs' => case x < y of
-        Bool.True => x `cons` (y `cons` nil)
+        Bool.True => cons x (cons y nil)
         Bool.False => y `cons` (nsert_sorted x xs') ?>?>
-
+/*
 sort_inner: List Int -> List Int -> List Int
 sort_inner xs ys = case xs of
     List.Nil => ys
@@ -60,7 +60,7 @@ sort_inner xs ys = case xs of
 
 sort: List Int -> List Int
 sort xs = sort_inner xs nil
-
+*/
 /*
 trait Foo a where
     bar: a -> a

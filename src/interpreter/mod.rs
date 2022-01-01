@@ -1,7 +1,5 @@
 use crate::common::{Context, Error, HasName, Searchable, SearchableByPath, Spanned, BinOp};
-use crate::ir::objects::{
-    Arg, DataDef, DataVariant, FunctionDefinition, FunctionObject, Object, Var,
-};
+use crate::ir::objects::{Arg, DataDef, DataVariant, FunctionDefinition, FunctionObject, Object, Var, DataType};
 use crate::ir::patmat::Pattern;
 use crate::ir::types::Type;
 use crate::ir::{parse_expr, Expr, ExprKind};
@@ -37,19 +35,38 @@ impl Interpreter<'_> {
             ExprKind::Int(i) => Ok(ByteCode::Int(*i)),
             ExprKind::Ident(i) => match bc_ctx.find(i.as_str()) {
                 Some(b) => Ok(b.clone()),
-                None => match self.ctx.find(i.as_str()) {
-                    Some(o) => match o {
-                        Object::FunctionDefinition(def) => {
-                            self.eval_func(vec![], Callable::Func(def.clone()), def.ftype.clone())
-                        }
-                        Object::Enum(e) => Ok(ByteCode::DataType(e)),
-                        Object::EnumVariant(_) => unimplemented!(),
-                        Object::Arg(_) => unimplemented!(),
-                        Object::Var(_) => unimplemented!(),
-                        Object::Type(_) => unimplemented!(),
-                        Object::EnumDecl(_) => unimplemented!(),
-                    },
-                    None => Err(Error::custom(expr.span, format!("Not found {}", i))),
+                None => {
+                    dbg!(i);
+                    match self.ctx.find(i.as_str()) {
+                        Some(o) => match o {
+                            Object::FunctionDefinition(def) => {
+                                self.eval_func(vec![], Callable::Func(def.clone()), def.ftype.clone())
+                            }
+                            Object::Enum(e) => {
+                                match e.ty.generics.len() {
+                                    0 => Ok(ByteCode::DataType(e.ty.clone())),
+                                    _ => {
+                                        let e_ty = e.ty();
+                                        Ok(ByteCode::ApplicationFunction(vec![], Callable::DataType(e.ty.clone()), e_ty))
+                                    }
+                                }
+                            },
+                            Object::EnumVariant(_) => unimplemented!(),
+                            Object::Arg(_) => unimplemented!(),
+                            Object::Var(_) => unimplemented!(),
+                            Object::Type(ty) => Ok(ByteCode::Type(ty.def.clone())),
+                            Object::EnumDecl(e) => {
+                                match e.generics.len() {
+                                    0 => Ok(ByteCode::DataType(e)),
+                                    _ => {
+                                        let e_ty = e.ty();
+                                        Ok(ByteCode::ApplicationFunction(vec![], Callable::DataType(e), e_ty))
+                                    }
+                                }
+                            }
+                        },
+                        None => Err(Error::custom(expr.span, format!("Not found {}", i))),
+                    }
                 },
             },
             ExprKind::Application(l, r) => self.eval(l.as_ref(), bc_ctx).and_then(|left| {
@@ -63,8 +80,7 @@ impl Interpreter<'_> {
                             };
                             self.eval_func(args, func, ty)
                         }
-                        t => {
-                            dbg!(t);
+                        _t => {
                             unimplemented!()
                         }
                     })
@@ -90,7 +106,18 @@ impl Interpreter<'_> {
                         .and_then(|right| ByteCode::bin_op(left, right, op.clone(), &self.ctx))
                 })
             }
-            _ => unimplemented!(),
+            ExprKind::Type(ty) => {
+                match ty.as_ref() {
+                    Type::Expr(ex) => {
+                        self.eval(ex, bc_ctx)
+                    }
+                    _ => Ok(ByteCode::Type(ty.clone())),
+                }
+            }
+            x => {
+                dbg!(x);
+                unimplemented!()
+            },
         }
     }
     fn eval_func(
@@ -118,6 +145,23 @@ impl Interpreter<'_> {
                     )
                 }
                 Callable::DataVariant(v) => Ok(ByteCode::DataVariant(v, args)),
+                Callable::DataType(d) => {
+                    debug_assert_eq!(d.generics.len(), args.len());
+                    let ty = Rc::new(Type::Data(Rc::new(DataType {
+                        name: d.name.clone(),
+                        generics: args.into_iter()
+                            .zip(d.generics.iter().map(|(x, _)| x))
+                            .map(|(bc, gen)| {
+                                match bc {
+                                    ByteCode::Type(ty) => (gen.clone(), ty.clone()),
+                                    _ => unimplemented!()
+                                }
+                            })
+                            .collect()
+                    })));
+
+                    Ok(ByteCode::Type(ty))
+                }
             },
         }
     }
@@ -216,6 +260,7 @@ fn is_aplyable(expr: &ByteCode, pat: &Pattern) -> bool {
 #[derive(Debug, Clone)]
 pub enum Callable {
     Func(Rc<FunctionDefinition>),
+    DataType(Rc<DataType>),
     DataVariant(Rc<DataVariant>),
 }
 
@@ -224,6 +269,7 @@ impl Display for Callable {
         match self {
             Callable::Func(d) => write!(f, "{}", d.name),
             Callable::DataVariant(v) => write!(f, "{}", v.name),
+            Callable::DataType(d) => write!(f, "{}", d),
         }
     }
 }
@@ -233,6 +279,7 @@ impl HasName for Callable {
         match self {
             Callable::Func(f) => f.name.as_str(),
             Callable::DataVariant(v) => v.name.as_str(),
+            Callable::DataType(d) => d.name.as_str()
         }
     }
 }
@@ -244,7 +291,8 @@ pub enum ByteCode {
     Var(Rc<Var>, Box<ByteCode>),
     Arg(Rc<Arg>, Box<ByteCode>),
     DataVariant(Rc<DataVariant>, Vec<ByteCode>),
-    DataType(Rc<DataDef>),
+    DataType(Rc<DataType>),
+    Type(Rc<Type>),
 }
 
 impl ByteCode {
@@ -255,7 +303,8 @@ impl ByteCode {
             ByteCode::Var(v, _) => v.ty.clone(),
             ByteCode::Arg(a, _) => a.ty.clone(),
             ByteCode::DataVariant(v, _) => Rc::new(Type::Data(v.dty.clone())),
-            ByteCode::DataType(_d) => Rc::new(Type::Type),
+            ByteCode::DataType(_) => Rc::new(Type::Type),
+            ByteCode::Type(_) => Rc::new(Type::Type),
         }
     }
 
@@ -292,7 +341,8 @@ impl Display for ByteCode {
             ByteCode::Var(v, bc) => write!(f, "{}: {}", v, bc),
             ByteCode::Arg(a, bc) => write!(f, "{}: {}", a, bc),
             ByteCode::DataVariant(v, bc) => write!(f, "{} {}", v, bc.iter().join(" ")),
-            ByteCode::DataType(d) => write!(f, "{}", d.ty),
+            ByteCode::DataType(d) => write!(f, "{}", d),
+            ByteCode::Type(ty) => write!(f, "{}", ty),
         }
     }
 }
@@ -347,7 +397,8 @@ impl HasName for ByteCode {
             ByteCode::Var(v, _) => v.name.as_str(),
             ByteCode::Arg(a, _) => a.name.as_str(),
             ByteCode::DataVariant(_, _) => "",
-            ByteCode::DataType(d) => d.ty.name.as_str(),
+            ByteCode::DataType(d) => d.name.as_str(),
+            ByteCode::Type(_) => "",
         }
     }
 }

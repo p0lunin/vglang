@@ -59,6 +59,10 @@ impl Type {
                     self
                 }
             }
+            Type::Data(d) => {
+                let gens = d.generics.iter().map(|(n, x)| (n.clone(), x.clone().update_set_generic_func(g, ty))).collect();
+                Rc::new(Type::Data(Rc::new(DataType::new(d.name.clone(), gens))))
+            }
             _ => self,
         }
     }

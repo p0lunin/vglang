@@ -3,10 +3,16 @@ use std::cmp::Ordering;
 use std::fmt::{Debug, Display, Formatter};
 use std::ops::{Add, Deref, DerefMut, Neg, Sub};
 
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(PartialEq, Copy, Clone)]
 pub struct Span {
     pub start: usize,
     pub end: usize,
+}
+
+impl Debug for Span {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Span").finish()
+    }
 }
 
 impl Span {

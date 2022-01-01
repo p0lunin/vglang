@@ -7,15 +7,17 @@ use crate::syntax::ast::{EnumDecl, EnumVariant, Token};
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::rc::Rc;
+use crate::ir::expr::interpret_expr_as_ty;
+use crate::Implementations;
 
 #[derive(Debug, PartialEq)]
 pub struct DataType {
     pub name: String,
-    pub generics: Vec<Rc<Type>>,
+    pub generics: Vec<(String, Rc<Type>)>,
 }
 
 impl DataType {
-    pub fn new(name: String, generics: Vec<Rc<Type>>) -> Self {
+    pub fn new(name: String, generics: Vec<(String, Rc<Type>)>) -> Self {
         DataType { name, generics }
     }
     pub fn ty(self: &Rc<Self>) -> Rc<Type> {
@@ -23,10 +25,10 @@ impl DataType {
     }
 }
 
-fn data_ty(ty: Rc<DataType>, generics: &[Rc<Type>]) -> Rc<Type> {
+fn data_ty(ty: Rc<DataType>, generics: &[(String, Rc<Type>)]) -> Rc<Type> {
     match generics {
         [] => Rc::new(Type::Data(ty)),
-        [x, xs @ ..] => Rc::new(Type::Function(Function {
+        [(_, x), xs @ ..] => Rc::new(Type::Function(Function {
             get_value: x.clone(),
             return_value: data_ty(ty, xs),
         })),
@@ -40,9 +42,8 @@ impl Display for DataType {
             xs => {
                 f.write_str("(")?;
                 f.write_str(self.name.as_str())?;
-                f.write_str(" ")?;
                 xs.iter().for_each(|x| {
-                    write!(f, " {}", x).unwrap();
+                    write!(f, " <{}>:{}", x.0, x.1).unwrap();
                 });
                 f.write_str(")")?;
                 Ok(())
@@ -68,13 +69,13 @@ impl DataDef {
             name: name.inner(),
             generics: generics
                 .into_iter()
-                .map(|g| Rc::new(Type::Generic(Generic::parse(g.inner()))))
+                .map(|g| (g.name.val.clone(), Rc::new(Type::Generic(Generic::parse(g.inner())))))
                 .collect(),
         });
         let mut objects = ty
             .generics
             .iter()
-            .map(|ty| {
+            .map(|(_, ty)| {
                 let name = match ty.as_ref() {
                     Type::Generic(g) => &g.name,
                     _ => unreachable!(),
@@ -146,10 +147,17 @@ impl DataVariant {
                 .map(|t| {
                     parse_expr(&t, ctx, &mut HashMap::new(), None)
                         .map(|x| x.unwrap())
-                        .and_then(|e| e.convert_to_type(ctx))
+                        .and_then(|e| interpret_expr_as_ty(e, ctx, &Implementations::new()))
                 })
                 .collect::<Result<Vec<_>, _>>()?,
         })
+    }
+
+    pub fn update_generic(mut self, gen: &Generic, ty: &Rc<Type>) -> Self {
+        self.data.iter_mut().for_each(|x| {
+            *x = x.clone().update_set_generic_func(gen, ty);
+        });
+        self
     }
 }
 

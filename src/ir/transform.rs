@@ -1,5 +1,5 @@
 use crate::common::{Context, Error, Spanned};
-use crate::ir::expr::parse_expr;
+use crate::ir::expr::{parse_expr, parse_type};
 use crate::ir::objects::{Arg, DataDef, FunctionDefinition, FunctionObject, Object, TypeObject};
 use crate::ir::types::{Generic, Type};
 use crate::ir::{expr, Implementations};
@@ -34,14 +34,11 @@ pub fn parse_function(
         objects: generics,
         parent: Some(&ctx),
     };
-    let func_type = parse_expr(
+    let func_type = parse_type(
         type_def.as_ref(),
         &ctx,
-        &mut HashMap::new(),
-        Some(Type::typ()),
-    )?
-    .unwrap() // TODO
-    .convert_to_type(&ctx)?;
+        &impls
+    )?;
     let func_def = Rc::new(FunctionDefinition {
         name: name.clone(),
         ftype: func_type.clone(),
@@ -146,7 +143,7 @@ pub fn parse_tokens<'a>(
         match token.inner() {
             TopLevelToken::Type(ty) => {
                 let name = ty.0.clone();
-                match expr::parse_type(&ty.1, &ctx) {
+                match expr::parse_type(&ty.1, &ctx, &impls) {
                     Ok(ty) => ctx.objects.push(Object::Type(Rc::new(TypeObject {
                         name: name.clone().inner(),
                         def: ty,
