@@ -2,23 +2,28 @@ mod common;
 pub mod interpreter;
 mod ir;
 mod syntax;
+mod arena;
 
 pub use crate::ir::Implementations;
 pub use interpreter::Interpreter;
+pub use common::global_context::{GlobalCtx, ScopeCtx};
+pub use common::DisplayScope;
 
-use crate::common::{peg_error_to_showed, Context};
+use crate::common::{peg_error_to_showed, LocalContext};
 use crate::interpreter::ByteCode;
-use crate::ir::objects::Object;
+use crate::ir::objects::{Object, FunctionObject};
 use crate::ir::parse_tokens;
 use crate::syntax::{parse_text, parse_token};
 use itertools::Itertools;
 use std::fs::File;
 use std::io::Read;
+use crate::common::global_context::{ScopeCtxInner};
+use crate::arena::Id;
 
-pub fn compile_file<'a>(
+pub fn compile_file(
     path_to_file: &str,
-    top: Option<&'a Context<'a, Object>>,
-) -> Result<(Context<'a, Object>, Implementations), String> {
+    global: &mut GlobalCtx
+) -> Result<Vec<Id<FunctionObject>>, String> {
     let mut file = match File::open(path_to_file) {
         Ok(f) => f,
         Err(e) => {
@@ -27,23 +32,23 @@ pub fn compile_file<'a>(
     };
     let mut data = String::new();
     file.read_to_string(&mut data).unwrap();
-    compile_code(data.as_str(), top)
+    compile_code(data.as_str(), global)
 }
 
-pub fn compile_code<'a>(code: &str, top: Option<&'a Context<'a, Object>>,) -> Result<(Context<'a, Object>, Implementations), String> {
+pub fn compile_code<'a>(code: &str, global: &mut GlobalCtx) -> Result<Vec<Id<FunctionObject>>, String> {
     let ast = match parse_text(&code) {
         Ok(d) => d,
         Err(e) => {
             return Err(peg_error_to_showed(e, &code));
         }
     };
-    let (ctx, impls) = match parse_tokens(ast, top) {
+    let ids = match parse_tokens(ast, global) {
         Ok(t) => t,
         Err(errs) => {
             return Err(errs.into_iter().map(|e| e.display(&code)).join("\n"));
         }
     };
-    Ok((ctx, impls))
+    Ok(ids)
 }
 
 pub fn eval(interpreter: &mut Interpreter, text: &str) -> Result<ByteCode, String> {
@@ -51,8 +56,8 @@ pub fn eval(interpreter: &mut Interpreter, text: &str) -> Result<ByteCode, Strin
     interpreter.execute_code(token).map_err(|e| e.display(text))
 }
 
-pub fn load_core() -> (Context<'static, Object>, Implementations) {
+pub fn load_core(global: &mut GlobalCtx) -> Vec<Id<FunctionObject>> {
     let core = include_str!("../core/core.vg");
-    compile_code(core, None)
+    compile_code(core, global)
         .expect("Core should be valid")
 }

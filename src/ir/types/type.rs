@@ -1,24 +1,85 @@
-use crate::common::Spanned;
-use crate::ir::objects::DataType;
+use crate::common::{Spanned, DisplayScope, PathToFind, Find};
+use crate::ir::objects::{DataDef};
 use crate::ir::types::base_types::Function;
-use crate::ir::Expr;
 use crate::syntax::ast;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Display, Formatter, Write};
 use std::ops::Deref;
 use std::rc::Rc;
 use crate::ir::types::Concrete;
+use crate::common::global_context::ScopeCtx;
+use crate::arena::{Arena, Id};
+use crate::GlobalCtx;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Clone)]
 pub enum Type {
     Function(Function),
     Unknown(Option<Generic>),
     Int,
-    Data(Concrete<DataType>),
+    Data(Concrete<DataDef>),
     Type,
     Never,
     Generic(Generic),
-    Expr(Expr),
-    Named(String, Rc<Type>),
+}
+
+impl Type {
+    pub fn move_into_scope(&self, old: &Arena<Type>, new: &mut Arena<Type>) -> Id<Type> {
+        match self {
+            Type::Function(f) => {
+                let g = old.get(f.get_value).unwrap().move_into_scope(old, new);
+                let r = old.get(f.return_value).unwrap().move_into_scope(old, new);
+                new.alloc(Type::Function(Function {
+                    get_value: g,
+                    return_value: r,
+                }))
+            }
+            Type::Data(d) => {
+                let gens = d.generics.iter().map(|x| {
+                    old.get(*x).unwrap().move_into_scope(old, new)
+                }).collect();
+                new.alloc(Type::Data(Concrete::new(
+                    d.base,
+                    gens
+                )))
+            }
+            x => new.alloc(x.clone())
+        }
+    }
+    pub fn eq(&self, other: &Type, ctx: &ScopeCtx) -> bool {
+        match (self, other) {
+            (Type::Int, Type::Int) |
+            (Type::Never, Type::Never) |
+            (Type::Type, Type::Type)
+                => true,
+            (Type::Unknown(g1), Type::Unknown(g2)) if g1 == g2
+                => true,
+            (Type::Generic(g11), Type::Generic(g22)) if g11 == g22
+                => true,
+            (Type::Function(f1), Type::Function(f2)) => {
+                ctx.get_type(f1.get_value).eq(ctx.get_type(f2.get_value), ctx) &&
+                    ctx.get_type(f1.return_value).eq(ctx.get_type(f2.return_value), ctx)
+            }
+            (Type::Data(d1), Type::Data(d2)) => {
+                d1.eq(d2, ctx)
+            }
+            _ => false,
+        }
+    }
+}
+
+impl<'a> DisplayScope<'a> for Type {
+    type Scope = (&'a Arena<Type>, &'a GlobalCtx);
+
+    fn display_value(&self, f: &mut impl Write, scope: &Self::Scope) -> std::fmt::Result {
+        match self {
+            Type::Function(func) => func.display_value(f, scope),
+            Type::Int => f.write_str("Int"),
+            Type::Type => f.write_str("Type"),
+            Type::Generic(g) => write!(f, "{}", g),
+            Type::Data(g) => g.display_value(f, scope),
+            Type::Never => f.write_str("Never"),
+            Type::Unknown(_) => f.write_str("_"),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -38,39 +99,81 @@ impl Display for Generic {
     }
 }
 
+impl Find for (Id<Generic>, &Generic) {
+    type Item = Id<Generic>;
+
+    fn find(&self, path: PathToFind) -> Option<Self::Item> {
+        match path.has_segments() {
+            true => None,
+            false => (self.1.name.as_str() == path.endpoint)
+                .then(|| self.0)
+        }
+    }
+}
+
 impl Type {
-    pub fn update_set_generic_func(self: Rc<Type>, g: &str, ty: &Rc<Type>) -> Rc<Type> {
-        match self.as_ref() {
-            Type::Generic(gen) => {
+    pub fn update_set_generic_func_unknowns(this: Id<Type>, g: &str, ty: Id<Type>, ctx: &mut ScopeCtx) -> Id<Type> {
+        match ctx.get_type(this) {
+            Type::Unknown(Some(gen)) => {
                 if gen.name.as_str() == g {
-                    ty.clone()
+                    ty
                 } else {
-                    self
+                    this
                 }
             }
             Type::Function(f) => {
-                let get_value = f.get_value.clone().update_set_generic_func(g, ty);
-                let return_value = f.return_value.clone().update_set_generic_func(g, ty);
-                if get_value != f.get_value || f.return_value != return_value {
-                    Rc::new(Type::Function(Function {
-                        get_value,
-                        return_value,
-                    }))
-                } else {
-                    self
-                }
+                let gtv = f.get_value;
+                let rtv = f.return_value;
+                let gt = Type::update_set_generic_func_unknowns(gtv, g, ty, ctx);
+                let rt = Type::update_set_generic_func_unknowns(rtv, g, ty, ctx);
+                ctx.alloc_type(Type::Function(Function {
+                    get_value: gt,
+                    return_value: rt,
+                }))
             }
             Type::Data(d) => {
-                let gens = d.generics
-                    .iter()
-                    .map(|gen| gen.clone().update_set_generic_func(g, ty)).collect();
-                Rc::new(Type::Data(Concrete::new(d.base.clone(), gens)))
+                let base = d.base;
+                let gens = d.generics.clone();
+                let gens = gens
+                    .into_iter()
+                    .map(|gen| Type::update_set_generic_func_unknowns(gen, g, ty, ctx)).collect();
+                ctx.alloc_type(Type::Data(Concrete::new(base, gens)))
             }
-            _ => self,
+            _ => { this },
+        }
+    }
+    pub fn update_set_generic_func(this: Id<Type>, g: &str, ty: Id<Type>, ctx: &mut ScopeCtx) -> Id<Type> {
+        match ctx.get_type(this) {
+            Type::Generic(gen) => {
+                if gen.name.as_str() == g {
+                    ty
+                } else {
+                    this
+                }
+            }
+            Type::Function(f) => {
+                let gtv = f.get_value;
+                let rtv = f.return_value;
+                let gt = Type::update_set_generic_func(gtv, g, ty, ctx);
+                let rt = Type::update_set_generic_func(rtv, g, ty, ctx);
+                ctx.alloc_type(Type::Function(Function {
+                    get_value: gt,
+                    return_value: rt,
+                }))
+            }
+            Type::Data(d) => {
+                let base = d.base;
+                let gens = d.generics.clone();
+                let gens = gens
+                    .into_iter()
+                    .map(|gen| Type::update_set_generic_func(gen, g, ty, ctx)).collect();
+                ctx.alloc_type(Type::Data(Concrete::new(base, gens)))
+            }
+            _ => { this },
         }
     }
 
-    pub fn expr_ty(self: &Rc<Self>) -> Rc<Type> {
+    /*pub fn expr_ty(self: &Rc<Self>) -> Rc<Type> {
         match self.as_ref() {
             Type::Generic(g) => Rc::new(Type::Unknown(Some(g.clone()))),
             Type::Function(f) => {
@@ -87,33 +190,32 @@ impl Type {
             }
             _ => self.clone()
         }
-    }
+    }*/
 }
 
 impl Type {
-    pub fn is_part_of(&self, other: &Type) -> bool {
+    pub fn is_part_of(&self, other: &Type, ctx: &ScopeCtx) -> bool {
         match (self, other) {
-            (_, Type::Never) => true,
+            (_, Type::Never | Type::Unknown(_)) => true,
             (_, Type::Unknown(_)) => true,
-            (Type::Function(l), Type::Function(r)) => l.is_part_of(r),
-            (Type::Int, Type::Int) => true,
-            (_, Type::Type) => true,
+            (Type::Function(l), Type::Function(r)) => l.is_part_of(r, ctx),
             (Type::Generic(l), Type::Generic(r)) => l.name.as_str() == r.name.as_str(),
-            (t, Type::Expr(e)) => t.is_part_of(&e.ty),
-            (Type::Expr(e), t) => e.ty.is_part_of(t),
-            (t, Type::Named(_, ty)) => t.is_part_of(ty),
-            (Type::Named(_, t), ty) => t.is_part_of(ty),
             (Type::Data(d1), Type::Data(d2)) => {
+                // if ctx[d1.base] == ctx[d2.base], then d1.base == d2.base
                 d1.base == d2.base &&
-                    d1.generics.iter().zip(d2.generics.iter()).all(|(x, y)| x.is_part_of(y))
+                    d1.generics.iter().zip(d2.generics.iter()).all(|(x, y)| {
+                        ctx.get_type(*x).is_part_of(ctx.get_type(*y), ctx)
+                    })
             },
+            (Type::Int, Type::Int) => true,
+            (Type::Type, Type::Type) => true,
             _ => false,
         }
     }
 
-    pub fn get_return_value(self: Rc<Type>) -> Rc<Type> {
-        match self.as_ref() {
-            Type::Function(f) => f.return_value.clone().get_return_value(),
+    pub fn get_return_value<'a>(&'a self, ctx: &'a ScopeCtx) -> &'a Type {
+        match self {
+            Type::Function(f) => ctx.get_type(f.return_value).get_return_value(ctx),
             _ => self,
         }
     }
@@ -131,34 +233,6 @@ impl Type {
 
     pub fn typ() -> Rc<Type> {
         Rc::new(Type::Type)
-    }
-
-    /*pub fn int(val: i128) -> Rc<Self> {
-        Rc::new(Type::Int(Int::Value(val)))
-    }*/
-
-    pub fn get_inner_type(self: &Rc<Type>) -> Rc<Type> {
-        match self.deref() {
-            Type::Expr(e) => e.ty.get_inner_type(),
-            Type::Named(_, ty) => ty.get_inner_type(),
-            _ => self.clone(),
-        }
-    }
-}
-
-impl Display for Type {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        match self {
-            Type::Function(func) => Display::fmt(func, f),
-            Type::Int => f.write_str("Int"),
-            Type::Type => f.write_str("Type"),
-            Type::Generic(g) => Display::fmt(g, f),
-            Type::Data(g) => Display::fmt(g, f),
-            Type::Never => f.write_str("Never"),
-            Type::Unknown(_) => f.write_str("_"),
-            Type::Expr(e) => Display::fmt(e, f),
-            Type::Named(n, _) => Display::fmt(n, f),
-        }
     }
 }
 /*
@@ -225,25 +299,25 @@ impl Type {
 }
 */
 impl Type {
-    pub fn count_args(&self) -> u8 {
+    pub fn count_args(&self, ctx: &ScopeCtx) -> u8 {
         match self {
-            Type::Function(t) => 1 + t.return_value.count_args(),
+            Type::Function(t) => 1 + ctx.get_type(t.return_value).count_args(ctx),
             _ => 0,
         }
     }
     // TODO: need?
-    pub fn args_types(self: &Rc<Type>) -> Vec<Rc<Type>> {
-        match self.deref() {
+    pub fn args_types(id: Id<Type>, ctx: &ScopeCtx) -> Vec<Id<Type>> {
+        match ctx.get_type(id) {
             Type::Function(f) => {
                 let mut vec = vec![];
                 vec.push(f.get_value.clone());
-                vec.extend(Type::args_types(&f.return_value));
+                vec.extend(Type::args_types(f.return_value, ctx));
                 vec
             }
-            _ => vec![self.clone()],
+            _ => vec![id],
         }
     }
-    pub fn types_in_scope(self: &Rc<Type>) -> Vec<(String, Rc<Type>)> {
+    /*pub fn types_in_scope(self: &Rc<Type>) -> Vec<(String, Rc<Type>)> {
         let mut types = vec![];
         match self.deref() {
             Type::Function(f) => {
@@ -258,17 +332,9 @@ impl Type {
             _ => {}
         };
         types
-    }
+    }*/
 }
 
-impl Type {
-    pub fn implication(self, other: Self) -> Self {
-        Type::Function(Function {
-            get_value: Rc::new(self),
-            return_value: Rc::new(other),
-        })
-    }
-}
 /*
 impl Type {
     pub fn name(&self) -> &str {

@@ -1,80 +1,56 @@
-use crate::common::{HasName, Searchable};
-use crate::ir::objects::{Arg, DataDef, DataVariant, FunctionDefinition, TypeObject, Var, DataType};
-use crate::ir::types::Type;
-use std::fmt::{Display, Formatter};
-use std::rc::Rc;
+use crate::ir::objects::{Arg, DataDef, Var, FunctionObject};
+use crate::ir::types::{Type, Generic};
+use std::fmt::{Write};
+use crate::arena::Id;
+use crate::common::global_context::ScopeCtx;
+use crate::common::DisplayScope;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Object {
-    FunctionDefinition(Rc<FunctionDefinition>),
-    EnumDecl(Rc<DataType>),
-    Enum(Rc<DataDef>),
-    EnumVariant(Rc<DataVariant>),
-    Arg(Rc<Arg>),
-    Var(Rc<Var>),
-    Type(Rc<TypeObject>),
+    Function(Id<FunctionObject>),
+    Enum(Id<DataDef>),
+    EnumVariant(Id<DataDef>, usize),
+    Generic(Id<Generic>),
+    Arg(Id<Arg>),
+    Var(Id<Var>),
 }
 
 impl Object {
-    pub fn var(name: String, ty: Rc<Type>) -> Self {
-        Object::Var(Rc::new(Var { name, ty }))
-    }
-}
-
-impl Searchable for Object {
-    type Item = Self;
-
-    fn find(&self, name: &str) -> Option<Self::Item> {
+    pub fn get_type(self, ctx: &mut ScopeCtx) -> Id<Type> {
         match self {
-            Object::FunctionDefinition(_) => None,
-            Object::Enum(e) => e.get_field(name).map(Object::EnumVariant),
-            Object::EnumVariant(_) => None,
-            Object::Arg(_) => None,
-            Object::Var(_) => None,
-            Object::Type(_) => None,
-            Object::EnumDecl(_) => None,
+            Object::Function(f) => {
+                ctx.global.get_func(f).get_type(&mut ctx.types)
+            },
+            Object::Arg(a) => {
+                ctx.get_arg(a).get_type()
+            },
+            Object::Enum(e) => {
+                ctx.global.get_data(e).as_ty(ctx)
+            },
+            Object::Var(v) => {
+                ctx.get_var(v).ty
+            },
+            Object::EnumVariant(id, idx) => {
+                ctx.global.get_data(id).get_variant_ty(idx, ctx)
+            }
+            Object::Generic(_) => {
+                ctx.alloc_type(Type::Type)
+            }
         }
     }
 }
 
-impl Object {
-    pub fn get_type(&self) -> Rc<Type> {
-        match self {
-            Object::FunctionDefinition(f) => f.ftype.expr_ty().clone(),
-            Object::Type(_t) => Type::typ(),
-            Object::Arg(a) => a.ty.clone(),
-            Object::Enum(e) => e.as_ty(),
-            Object::EnumVariant(e) => e.get_type(),
-            Object::Var(v) => v.ty.clone(),
-            Object::EnumDecl(e) => e.as_ty(),
-        }
-    }
-}
+impl<'a> DisplayScope<'a> for Object {
+    type Scope = ScopeCtx<'a>;
 
-impl Display for Object {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        match self {
-            Object::Type(t) => f.write_str(&format!("{}", t)),
-            Object::Var(v) => f.write_str(&format!("{}", v)),
-            Object::FunctionDefinition(o) => Display::fmt(&o, f),
-            Object::Arg(_) => unimplemented!(),
-            Object::Enum(e) => Display::fmt(e, f),
-            Object::EnumVariant(e) => Display::fmt(e, f),
-            Object::EnumDecl(e) => Display::fmt(e, f),
-        }
-    }
-}
-
-impl HasName for Object {
-    fn name(&self) -> &str {
-        match self {
-            Object::Type(t) => &t.name,
-            Object::Var(t) => &t.name,
-            Object::FunctionDefinition(t) => &t.name,
-            Object::Arg(a) => &a.name,
-            Object::Enum(e) => e.ty.name.as_str(),
-            Object::EnumVariant(e) => e.name.as_str(),
-            Object::EnumDecl(e) => e.name.as_str()
+    fn display_value(&self, f: &mut impl Write, scope: &Self::Scope) -> std::fmt::Result {
+        match *self {
+            Object::Function(o) => scope.global.get_func(o).display_value(f, scope.global),
+            Object::Enum(e) => scope.global.get_data(e).display_value(f, &()),
+            Object::EnumVariant(id, idx) => scope.global.get_data_variant(id, idx).display_value(f, scope),
+            Object::Generic(g) => f.write_str(scope.get_generic(g).name.as_str()),
+            Object::Arg(a) => f.write_str(scope.get_arg(a).name.as_str()),
+            Object::Var(v) => f.write_str(scope.get_var(v).name.as_str()),
         }
     }
 }

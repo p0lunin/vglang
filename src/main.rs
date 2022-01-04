@@ -1,21 +1,9 @@
 use clap::{App, Arg};
-use fsmcreator::{compile_file, eval, Interpreter, load_core};
+use fsmcreator::{compile_file, eval, Interpreter, load_core, GlobalCtx, ScopeCtx, DisplayScope};
 use std::io;
 use std::io::{stdin, Write};
-/*use z3::ast::Ast;
-
-fn some() {
-    let config = z3::Config::new();
-    let ctx = z3::Context::new(&config);
-    let solver = z3::Solver::new(&ctx);
-    solver.push();
-    solver.assert(&z3::ast::Int::from_u64(&ctx, 12).gt(&z3::ast::Int::from_u64(&ctx, 11)));
-    let res = solver.check();
-    println!("{:?}", res)
-}*/
 
 fn main() {
-    //some();
     let app = App::new("Tekstkvest")
         .version("Какая блять версия")
         .author("Anonymous student from college Server")
@@ -44,11 +32,13 @@ fn main() {
     };
     let path_to_std = matches.value_of("std");
 
-    let (core_ctx, core_impls) = load_core();
+    let mut global = GlobalCtx::new();
 
-    let ctx = {
+    let _core_ctx = load_core(&mut global);
+
+    let _std_ctx = {
         path_to_std.and_then(|path_to_std| {
-            let ctx = match compile_file(path_to_std, Some(&core_ctx)) {
+            let ctx = match compile_file(path_to_std, &mut global) {
                 Ok(ctx) => ctx,
                 Err(e) => {
                     println!("{}", e);
@@ -58,14 +48,7 @@ fn main() {
             Some(ctx)
         })
     };
-    let (ctx, mut impls) = match ctx {
-        Some((c, mut impls)) => {
-            impls.extend(core_impls);
-            (c, impls)
-        },
-        None => (core_ctx, core_impls),
-    };
-    let (ctx, impls2) = match compile_file(path_to_file, Some(&ctx)) {
+    let _file_ctx = match compile_file(path_to_file, &mut global) {
         Ok(ctx) => ctx,
         Err(e) => {
             println!("{}", e);
@@ -73,18 +56,17 @@ fn main() {
         }
     };
     println!("Objects: ");
-    ctx.objects.iter().for_each(|o| {
-        println!("{}\n", o);
+    global.iter_funcs().for_each(|(f, ctx)| {
+        println!("{}\n", f.display_value_string(&global));
     });
 
-    let mut f2 = impls2.functions;
-    f2.append(&mut impls.functions);
-
-    let mut interpreter = Interpreter::new(&f2, &ctx);
-
-    repl(">> ", |d| match eval(&mut interpreter, &d) {
-        Ok(b) => b.print_value_string(),
-        Err(e) => e,
+    repl(">> ", |d| {
+        let mut ctx = ScopeCtx::new(&global);
+        let mut interpreter = Interpreter::new(&mut ctx);
+        match eval(&mut interpreter, &d) {
+            Ok(b) => b.display_value_string(&ctx),
+            Err(e) => e,
+        }
     })
 }
 

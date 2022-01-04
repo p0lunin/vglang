@@ -1,25 +1,23 @@
 use crate::syntax::ast::Path;
 use std::ops::Deref;
 use crate::ir::objects::Object;
-use crate::ir::types::{Type, Concrete};
-use std::rc::Rc;
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct Context<'a, T: 'a> {
+pub struct LocalContext<'a, T: 'a> {
     pub objects: Vec<T>,
-    pub parent: Option<&'a Context<'a, T>>,
+    pub parent: Option<&'a LocalContext<'a, T>>,
 }
 
-impl<'a, T: 'a> Context<'a, T> {
+impl<'a, T: 'a> LocalContext<'a, T> {
     pub fn new() -> Self {
-        Context {
+        LocalContext {
             objects: vec![],
             parent: None,
         }
     }
 }
 
-impl<'a> Context<'a, Object> {
+impl<'a> LocalContext<'a, Object> {
     /*pub fn find_ty(&self, name: &str) -> Option<Rc<Type>> {
         let obj = self.find(name)?;
         match obj {
@@ -31,18 +29,10 @@ impl<'a> Context<'a, Object> {
             _ => None
         }
     }*/
-    pub fn find_bool(&self) -> Rc<Type> {
-        let obj = self.find("Bool").unwrap();
-        match obj {
-            Object::EnumDecl(e) => { Rc::new(Type::Data(Concrete::base(e))) }
-            Object::Enum(e) => { Rc::new(Type::Data(Concrete::base(e.ty.clone()))) }
-            _ => unreachable!()
-        }
-    }
 }
 
 
-impl<'a, T: HasName + Clone + 'a> Searchable for Context<'a, T> {
+impl<'a, T: HasName + Clone + 'a> Searchable for LocalContext<'a, T> {
     type Item = T;
     fn find(&self, name: &str) -> Option<T> {
         let this = self.objects.iter().find(|t| t.name() == name);
