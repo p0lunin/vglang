@@ -19,3 +19,6 @@ criterion = "0.3"
 [[bench]]
 name = "min"
 harness = false
+
+[profile.release]
+debug = true
