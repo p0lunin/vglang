@@ -1,0 +1,76 @@
+data Foo = A | B Int
+/*| C { a: Int, b: Int }*/
+
+caseFoo: Foo -> Int
+caseFoo x = case x of
+    Foo.A => 1
+    Foo.B v => v ?>
+
+makeA: Foo
+makeA = Foo.A
+
+add: Int -> Int -> Int
+add x y = x + y
+
+add1: Int -> Int
+add1 x = x + 1
+
+call: Int -> (Int -> Int -> Int) -> Int
+call x f = x `f` 1
+
+let': Int -> Int
+let' x = let foo = x + 1 in foo + 1
+
+case': Int -> Int
+case' x = case x of _ => x ?>
+
+generics<a>: a -> a
+generics x = x
+
+data GenData<a> = Build a
+
+gen_struct<a>: a -> (GenData a)
+gen_struct x = GenData.Build x
+
+gen_struct_int: Int -> (GenData Int)
+gen_struct_int x = GenData.Build x
+
+gen_struct_int': Int -> (GenData Int)
+gen_struct_int' x = GenData.Build x
+
+data List<a> = Nil | Cons a (List a)
+
+cons<a>: a -> List a -> List a
+cons x xs = List.Cons x xs
+
+nil<a>: List a
+nil = List.Nil
+
+nsert_sorted: Int -> List Int -> List Int
+nsert_sorted x xs = case xs of
+    List.Nil => cons x nil
+    List.Cons y xs' => case x < y of
+        Bool.True => x `cons` (cons y xs')
+        Bool.False => y `cons` (nsert_sorted x xs') ?>?>
+
+sort_inner: List Int -> List Int -> List Int
+sort_inner xs ys = case xs of
+    List.Nil => ys
+    List.Cons x xs' => sort_inner xs' (nsert_sorted x ys) ?>
+
+sort: List Int -> List Int
+sort xs = sort_inner xs nil
+
+gen: Int -> List Int
+gen x = case x == 0 of
+    Bool.True => nil
+    Bool.False => cons x (gen (x - 1)) ?>
+
+/*
+trait Foo a where
+    bar: a -> a
+
+instance Foo Int where
+    bar: Int -> Int
+    bar x = x
+*/
