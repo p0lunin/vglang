@@ -3,6 +3,7 @@ pub mod interpreter;
 mod ir;
 mod syntax;
 mod arena;
+mod lir;
 
 pub use crate::ir::Implementations;
 pub use interpreter::Interpreter;
