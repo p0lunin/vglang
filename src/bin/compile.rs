@@ -1,5 +1,5 @@
 use clap::{App, Arg};
-use fsmcreator::{compile_file, eval, Interpreter, load_core, GlobalCtx, ScopeCtx, DisplayScope};
+use fsmcreator::{compile_file, eval, load_core, DisplayScope, GlobalCtx, Interpreter, ScopeCtx};
 use std::io;
 use std::io::{stdin, Write};
 
@@ -55,7 +55,7 @@ fn main() {
             return;
         }
     };
-    global.iter_funcs().for_each(|(x, _)| {
-        println!("{}", x.display_value_string(&global))
-    });
+    global
+        .iter_funcs()
+        .for_each(|(x, _)| println!("{}", x.display_value_string(&global)));
 }

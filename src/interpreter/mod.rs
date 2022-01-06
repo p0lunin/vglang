@@ -1,15 +1,17 @@
-use crate::common::{LocalContext, Error, HasName, Searchable, Spanned, BinOp, Find, PathToFind, DisplayScope};
-use crate::ir::objects::{Arg, Object, Var, DataDef, FunctionObject};
+use crate::arena::{Arena, Id};
+use crate::common::global_context::ScopeCtx;
+use crate::common::{
+    BinOp, DisplayScope, Error, Find, HasName, LocalContext, PathToFind, Searchable, Spanned,
+};
+use crate::ir::objects::{Arg, DataDef, FunctionObject, Object, Var};
 use crate::ir::patmat::Pattern;
-use crate::ir::types::{Type, Concrete};
+use crate::ir::types::{Concrete, Type};
 use crate::ir::{parse_expr, Expr, ExprKind};
-use crate::syntax::ast::{Token};
+use crate::syntax::ast::Token;
 use itertools::Itertools;
-use std::collections::HashMap;
-use std::fmt::{Write};
-use crate::common::global_context::{ScopeCtx, ScopeCtxInner};
-use crate::arena::{Id, Arena};
 use smallvec::smallvec;
+use std::collections::HashMap;
+use std::fmt::Write;
 
 #[derive(Debug)]
 pub struct Interpreter<'a, 'b> {
@@ -28,65 +30,64 @@ impl Interpreter<'_, '_> {
             .ok_or_else(|| Error::cannot_infer_type(token.span))?;
         self.eval(&ir, &LocalContext::new())
     }
-// List.Cons 1 List.Nil
-    pub fn eval(&mut self, expr: &Expr, bc_ctx: &LocalContext<'_, ByteCode>) -> Result<ByteCode, Error> {
+    // List.Cons 1 List.Nil
+    pub fn eval(
+        &mut self,
+        expr: &Expr,
+        bc_ctx: &LocalContext<'_, ByteCode>,
+    ) -> Result<ByteCode, Error> {
         match &expr.kind {
             ExprKind::Int(i) => Ok(ByteCode::Int(*i)),
-            ExprKind::Ident(i) => {
-                match bc_ctx.find(i.as_str()) {
-                    Some(b) => Ok(b.clone()),
-                    None => {
-                        match self.ctx.find(PathToFind::name(i.as_str())) {
-                            Some(o) => match o {
-                                Object::Function(def) => {
-                                    let ty = self.ctx.global.get_func(def).get_type(&mut self.ctx.types);
-                                    self.eval_func(vec![], Callable::Func(def), ty)
+            ExprKind::Ident(i) => match bc_ctx.find(i.as_str()) {
+                Some(b) => Ok(b.clone()),
+                None => match self.ctx.find(PathToFind::name(i.as_str())) {
+                    Some(o) => match o {
+                        Object::Function(def) => {
+                            let ty = self.ctx.global.get_func(def).get_type(&mut self.ctx.types);
+                            self.eval_func(vec![], Callable::Func(def), ty)
+                        }
+                        Object::Enum(id) => {
+                            let e = self.ctx.global.get_data(id);
+                            match e.ty.generics.len() {
+                                0 => Ok(ByteCode::DataType(Concrete::new(id, vec![]))),
+                                _ => {
+                                    let e_ty = e.as_ty(&mut self.ctx);
+                                    Ok(ByteCode::ApplicationFunction(
+                                        vec![],
+                                        Callable::DataType(id),
+                                        e_ty,
+                                    ))
                                 }
-                                Object::Enum(id) => {
-                                    let e = self.ctx.global.get_data(id);
-                                    match e.ty.generics.len() {
-                                        0 => Ok(ByteCode::DataType(Concrete::new(id, vec![]))),
-                                        _ => {
-                                            let e_ty = e.as_ty(&mut self.ctx);
-                                            Ok(ByteCode::ApplicationFunction(vec![], Callable::DataType(id), e_ty))
-                                        }
-                                    }
-                                },
-                                Object::Arg(_) => unimplemented!(),
-                                Object::Var(_) => unimplemented!(),
-                                Object::EnumVariant(_, _) => unimplemented!(),
-                                Object::Generic(g) => {
-                                    let gen = Type::Generic(self.ctx.get_generic(g).clone());
-                                    Ok(ByteCode::Type(self.ctx.alloc_type(
-                                        gen
-                                    )))
-                                }
-                            },
-                            None => Err(Error::custom(expr.span, format!("Not found {}", i))),
+                            }
+                        }
+                        Object::Arg(_) => unimplemented!(),
+                        Object::Var(_) => unimplemented!(),
+                        Object::EnumVariant(_, _) => unimplemented!(),
+                        Object::Generic(g) => {
+                            let gen = Type::Generic(self.ctx.get_generic(g).clone());
+                            Ok(ByteCode::Type(self.ctx.alloc_type(gen)))
                         }
                     },
-                }
+                    None => Err(Error::custom(expr.span, format!("Not found {}", i))),
+                },
             },
-            ExprKind::Application(l, r) => {
-                self.eval(l.as_ref(), bc_ctx).and_then(|left| {
-                    self.eval(r.as_ref(), bc_ctx).and_then(|right| {
-                        match left.inner() {
-                            ByteCode::ApplicationFunction(mut args, func, ty) => {
-                                args.push(right);
-                                let ty = match self.ctx.get_type(ty) {
-                                    Type::Function(f) => f.return_value.clone(),
-                                    _otherwise => ty,
-                                };
-                                self.eval_func(args, func, ty)
-                            }
-                            _t => {
-                                dbg!(_t);
-                                unimplemented!()
-                            }
+            ExprKind::Application(l, r) => self.eval(l.as_ref(), bc_ctx).and_then(|left| {
+                self.eval(r.as_ref(), bc_ctx)
+                    .and_then(|right| match left.inner() {
+                        ByteCode::ApplicationFunction(mut args, func, ty) => {
+                            args.push(right);
+                            let ty = match self.ctx.get_type(ty) {
+                                Type::Function(f) => f.return_value.clone(),
+                                _otherwise => ty,
+                            };
+                            self.eval_func(args, func, ty)
+                        }
+                        _t => {
+                            dbg!(_t);
+                            unimplemented!()
                         }
                     })
-                })
-            },
+            }),
             ExprKind::Let { var, assign, expr } => {
                 let assigned = self.eval(assign.as_ref(), bc_ctx)?;
                 let ctx = LocalContext {
@@ -103,23 +104,19 @@ impl Interpreter<'_, '_> {
                 let v_ty = self.ctx.global.get_data(*v).get_variant_ty(*idx, self.ctx);
                 self.eval_func(vec![], Callable::DataVariant(v.clone(), *idx), v_ty)
             }
-            ExprKind::BinOp(l, r, op) => {
-                self.eval(l, bc_ctx).and_then(|left| {
-                    self.eval(r, bc_ctx)
-                        .and_then(|right| ByteCode::bin_op(left, right, op.clone(), self.ctx))
-                })
-            }
-            ExprKind::Neg(x) => {
-                match self.eval(x, bc_ctx)? {
-                    ByteCode::Int(i) => Ok(ByteCode::Int(-i)),
-                    _ => unreachable!("This must be checked by typecheker.")
-                }
-            }
+            ExprKind::BinOp(l, r, op) => self.eval(l, bc_ctx).and_then(|left| {
+                self.eval(r, bc_ctx)
+                    .and_then(|right| ByteCode::bin_op(left, right, op.clone(), self.ctx))
+            }),
+            ExprKind::Neg(x) => match self.eval(x, bc_ctx)? {
+                ByteCode::Int(i) => Ok(ByteCode::Int(-i)),
+                _ => unreachable!("This must be checked by typecheker."),
+            },
             ExprKind::Type(ty) => Ok(ByteCode::Type(*ty)),
             x => {
                 dbg!(x);
                 unimplemented!()
-            },
+            }
         }
     }
     fn eval_func(
@@ -149,18 +146,16 @@ impl Interpreter<'_, '_> {
                 Callable::DataVariant(v, idx) => {
                     let types = args.iter().map(|arg| arg.ty(&mut self.ctx.types)).collect();
                     Ok(ByteCode::DataVariant(Concrete::new(v, types), idx, args))
-                },
+                }
                 Callable::DataType(d) => {
                     let ty = self.ctx.alloc_type(Type::Data(Concrete::new(
                         d.clone(),
                         args.into_iter()
-                            .map(|bc | {
-                                match bc {
-                                    ByteCode::Type(ty) => ty.clone(),
-                                    _ => unimplemented!()
-                                }
+                            .map(|bc| match bc {
+                                ByteCode::Type(ty) => ty.clone(),
+                                _ => unimplemented!(),
                             })
-                            .collect()
+                            .collect(),
                     )));
 
                     Ok(ByteCode::Type(ty))
@@ -230,7 +225,7 @@ impl Interpreter<'_, '_> {
                     }
                     _ => unreachable!(),
                 }
-            },
+            }
             Pattern::Ident(i) => scope.objects.push(ByteCode::Var(
                 Var {
                     name: i.clone(),
@@ -276,7 +271,10 @@ impl<'a> DisplayScope<'a> for Callable {
         match self {
             Callable::Func(c) => scope.global.get_func(*c).display_value(f, scope.global)?,
             Callable::DataType(c) => scope.global.get_data(*c).display_value(f, &())?,
-            Callable::DataVariant(c, idx) => scope.global.get_data_variant(*c, *idx).display_value(f, scope)?,
+            Callable::DataVariant(c, idx) => scope
+                .global
+                .get_data_variant(*c, *idx)
+                .display_value(f, scope)?,
         };
         Ok(())
     }
@@ -301,25 +299,10 @@ impl ByteCode {
             ByteCode::Var(v, _) => v.ty,
             ByteCode::Arg(a, _) => a.ty,
             ByteCode::DataVariant(v, _, _) => {
-                ctx.alloc(Type::Data(Concrete::new(
-                    v.base,
-                    v.generics.clone()
-                )))
-            },
+                ctx.alloc(Type::Data(Concrete::new(v.base, v.generics.clone())))
+            }
             ByteCode::DataType(_) => ctx.alloc(Type::Type),
             ByteCode::Type(_) => ctx.alloc(Type::Type),
-        }
-    }
-
-    fn into_ty(self, ctx: &mut ScopeCtx) -> Result<Id<Type>, String> {
-        match self {
-            ByteCode::ApplicationFunction(_, _, _) => Err("123".to_string()),
-            ByteCode::Int(_) => Err("124".to_string()),
-            ByteCode::Var(_, x) => x.into_ty(ctx),
-            ByteCode::Arg(_, x) => x.into_ty(ctx),
-            ByteCode::DataVariant(_, _, _) => Err("125".to_string()),//Rc::new(Type::Data(Concrete::new(v.base.dty.clone(), v.generics.clone()))),
-            ByteCode::DataType(ty) => Ok(ctx.alloc_type(Type::Data(ty))),
-            ByteCode::Type(ty) => Ok(ty),
         }
     }
 
@@ -336,13 +319,13 @@ fn int_to_bool(bc: ByteCode, ro: &ScopeCtx) -> ByteCode {
     match bc {
         ByteCode::Int(0) => match ro.find(PathToFind::new("False", smallvec!["Bool"])) {
             Some(Object::EnumVariant(v, x)) => ByteCode::DataVariant(Concrete::base(v), x, vec![]),
-            _ => unreachable!()
-        }
+            _ => unreachable!(),
+        },
         ByteCode::Int(1) => match ro.find(PathToFind::new("True", smallvec!["Bool"])) {
             Some(Object::EnumVariant(v, x)) => ByteCode::DataVariant(Concrete::base(v), x, vec![]),
-            _ => unreachable!()
-        }
-        _ => unreachable!()
+            _ => unreachable!(),
+        },
+        _ => unreachable!(),
     }
 }
 
@@ -353,8 +336,14 @@ impl<'a> DisplayScope<'a> for ByteCode {
         match self {
             ByteCode::ApplicationFunction(bc, cal, ty) => {
                 cal.display_value(f, scope)?;
-                write!(f, "({}): ", bc.iter().map(|bc| bc.display_value_string(scope)).join(","))?;
-                scope.get_type(*ty).display_value(f, &(scope.types(), scope.global))?;
+                write!(
+                    f,
+                    "({}): ",
+                    bc.iter().map(|bc| bc.display_value_string(scope)).join(",")
+                )?;
+                scope
+                    .get_type(*ty)
+                    .display_value(f, &(scope.types(), scope.global))?;
             }
             ByteCode::Int(i) => write!(f, "{}", i)?,
             ByteCode::Var(_, bc) => bc.display_value(f, scope)?,
@@ -364,11 +353,21 @@ impl<'a> DisplayScope<'a> for ByteCode {
                 if bc.len() == 0 {
                     f.write_str(name)?;
                 } else {
-                    write!(f, "({} {})", name, bc.iter().map(|x| x.display_value_string(scope)).join(" ").as_str())?;
+                    write!(
+                        f,
+                        "({} {})",
+                        name,
+                        bc.iter()
+                            .map(|x| x.display_value_string(scope))
+                            .join(" ")
+                            .as_str()
+                    )?;
                 };
-            },
+            }
             ByteCode::DataType(d) => d.display_value(f, &(scope.types(), scope.global))?,
-            ByteCode::Type(ty) => scope.get_type(*ty).display_value(f, &(scope.types(), scope.global))?,
+            ByteCode::Type(ty) => scope
+                .get_type(*ty)
+                .display_value(f, &(scope.types(), scope.global))?,
         }
         Ok(())
     }
@@ -426,7 +425,7 @@ impl ByteCode {
             (ByteCode::Int(i), ByteCode::Int(i2)) => Ok(ByteCode::Int((i > i2) as i128)),
             _ => {
                 unimplemented!()
-            },
+            }
         }
     }
     fn eq(self, other: Self) -> Result<Self, Error> {
@@ -434,15 +433,13 @@ impl ByteCode {
             (ByteCode::Int(i), ByteCode::Int(i2)) => Ok(ByteCode::Int((i == i2) as i128)),
             _ => {
                 unimplemented!()
-            },
+            }
         }
     }
     fn value(self) -> Self {
         match self {
-            ByteCode::Arg(_, x) |
-            ByteCode::Var(_, x)
-            => (*x).value(),
-            _ => self
+            ByteCode::Arg(_, x) | ByteCode::Var(_, x) => (*x).value(),
+            _ => self,
         }
     }
 }

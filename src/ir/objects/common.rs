@@ -1,9 +1,7 @@
-use crate::common::{Spanned, PathToFind, Find};
+use crate::arena::Id;
+use crate::common::{Find, PathToFind, Spanned};
 use crate::ir::types::Type;
 use std::fmt::{Display, Formatter};
-use std::rc::Rc;
-use crate::arena::Id;
-use crate::common::global_context::ScopeCtx;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Arg {
@@ -29,8 +27,7 @@ impl Find for (Id<Arg>, &Arg) {
     fn find(&self, path: PathToFind) -> Option<Self::Item> {
         match path.has_segments() {
             true => None,
-            false => (self.1.name.as_str() == path.endpoint)
-                .then(|| self.0)
+            false => (self.1.name.as_str() == path.endpoint).then(|| self.0),
         }
     }
 }
@@ -59,8 +56,7 @@ impl Find for (Id<Var>, &Var) {
     fn find(&self, path: PathToFind) -> Option<Self::Item> {
         match path.has_segments() {
             true => None,
-            false => (self.1.name.as_str() == path.endpoint)
-                .then(|| self.0)
+            false => (self.1.name.as_str() == path.endpoint).then(|| self.0),
         }
     }
 }

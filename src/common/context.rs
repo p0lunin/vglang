@@ -1,6 +1,6 @@
+use crate::ir::objects::Object;
 use crate::syntax::ast::Path;
 use std::ops::Deref;
-use crate::ir::objects::Object;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct LocalContext<'a, T: 'a> {
@@ -30,7 +30,6 @@ impl<'a> LocalContext<'a, Object> {
         }
     }*/
 }
-
 
 impl<'a, T: HasName + Clone + 'a> Searchable for LocalContext<'a, T> {
     type Item = T;

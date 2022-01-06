@@ -1,14 +1,13 @@
-use crate::common::{Spanned, DisplayScope, PathToFind, Find};
-use crate::ir::objects::{DataDef};
-use crate::ir::types::base_types::Function;
-use crate::syntax::ast;
-use std::fmt::{Display, Formatter, Write};
-use std::ops::Deref;
-use std::rc::Rc;
-use crate::ir::types::Concrete;
-use crate::common::global_context::ScopeCtx;
 use crate::arena::{Arena, Id};
+use crate::common::global_context::ScopeCtx;
+use crate::common::{DisplayScope, Find, PathToFind, Spanned};
+use crate::ir::objects::DataDef;
+use crate::ir::types::base_types::Function;
+use crate::ir::types::Concrete;
+use crate::syntax::ast;
 use crate::GlobalCtx;
+use std::fmt::{Display, Formatter, Write};
+use std::rc::Rc;
 
 #[derive(Debug, Clone)]
 pub enum Type {
@@ -33,34 +32,29 @@ impl Type {
                 }))
             }
             Type::Data(d) => {
-                let gens = d.generics.iter().map(|x| {
-                    old.get(*x).unwrap().move_into_scope(old, new)
-                }).collect();
-                new.alloc(Type::Data(Concrete::new(
-                    d.base,
-                    gens
-                )))
+                let gens = d
+                    .generics
+                    .iter()
+                    .map(|x| old.get(*x).unwrap().move_into_scope(old, new))
+                    .collect();
+                new.alloc(Type::Data(Concrete::new(d.base, gens)))
             }
-            x => new.alloc(x.clone())
+            x => new.alloc(x.clone()),
         }
     }
     pub fn eq(&self, other: &Type, ctx: &ScopeCtx) -> bool {
         match (self, other) {
-            (Type::Int, Type::Int) |
-            (Type::Never, Type::Never) |
-            (Type::Type, Type::Type)
-                => true,
-            (Type::Unknown(g1), Type::Unknown(g2)) if g1 == g2
-                => true,
-            (Type::Generic(g11), Type::Generic(g22)) if g11 == g22
-                => true,
+            (Type::Int, Type::Int) | (Type::Never, Type::Never) | (Type::Type, Type::Type) => true,
+            (Type::Unknown(g1), Type::Unknown(g2)) if g1 == g2 => true,
+            (Type::Generic(g11), Type::Generic(g22)) if g11 == g22 => true,
             (Type::Function(f1), Type::Function(f2)) => {
-                ctx.get_type(f1.get_value).eq(ctx.get_type(f2.get_value), ctx) &&
-                    ctx.get_type(f1.return_value).eq(ctx.get_type(f2.return_value), ctx)
+                ctx.get_type(f1.get_value)
+                    .eq(ctx.get_type(f2.get_value), ctx)
+                    && ctx
+                        .get_type(f1.return_value)
+                        .eq(ctx.get_type(f2.return_value), ctx)
             }
-            (Type::Data(d1), Type::Data(d2)) => {
-                d1.eq(d2, ctx)
-            }
+            (Type::Data(d1), Type::Data(d2)) => d1.eq(d2, ctx),
             _ => false,
         }
     }
@@ -105,14 +99,18 @@ impl Find for (Id<Generic>, &Generic) {
     fn find(&self, path: PathToFind) -> Option<Self::Item> {
         match path.has_segments() {
             true => None,
-            false => (self.1.name.as_str() == path.endpoint)
-                .then(|| self.0)
+            false => (self.1.name.as_str() == path.endpoint).then(|| self.0),
         }
     }
 }
 
 impl Type {
-    pub fn update_set_generic_func_unknowns(this: Id<Type>, g: &str, ty: Id<Type>, ctx: &mut ScopeCtx) -> Id<Type> {
+    pub fn update_set_generic_func_unknowns(
+        this: Id<Type>,
+        g: &str,
+        ty: Id<Type>,
+        ctx: &mut ScopeCtx,
+    ) -> Id<Type> {
         match ctx.get_type(this) {
             Type::Unknown(Some(gen)) => {
                 if gen.name.as_str() == g {
@@ -136,13 +134,19 @@ impl Type {
                 let gens = d.generics.clone();
                 let gens = gens
                     .into_iter()
-                    .map(|gen| Type::update_set_generic_func_unknowns(gen, g, ty, ctx)).collect();
+                    .map(|gen| Type::update_set_generic_func_unknowns(gen, g, ty, ctx))
+                    .collect();
                 ctx.alloc_type(Type::Data(Concrete::new(base, gens)))
             }
-            _ => { this },
+            _ => this,
         }
     }
-    pub fn update_set_generic_func(this: Id<Type>, g: &str, ty: Id<Type>, ctx: &mut ScopeCtx) -> Id<Type> {
+    pub fn update_set_generic_func(
+        this: Id<Type>,
+        g: &str,
+        ty: Id<Type>,
+        ctx: &mut ScopeCtx,
+    ) -> Id<Type> {
         match ctx.get_type(this) {
             Type::Generic(gen) => {
                 if gen.name.as_str() == g {
@@ -166,10 +170,11 @@ impl Type {
                 let gens = d.generics.clone();
                 let gens = gens
                     .into_iter()
-                    .map(|gen| Type::update_set_generic_func(gen, g, ty, ctx)).collect();
+                    .map(|gen| Type::update_set_generic_func(gen, g, ty, ctx))
+                    .collect();
                 ctx.alloc_type(Type::Data(Concrete::new(base, gens)))
             }
-            _ => { this },
+            _ => this,
         }
     }
 
@@ -197,16 +202,17 @@ impl Type {
     pub fn is_part_of(&self, other: &Type, ctx: &ScopeCtx) -> bool {
         match (self, other) {
             (_, Type::Never | Type::Unknown(_)) => true,
-            (_, Type::Unknown(_)) => true,
             (Type::Function(l), Type::Function(r)) => l.is_part_of(r, ctx),
             (Type::Generic(l), Type::Generic(r)) => l.name.as_str() == r.name.as_str(),
             (Type::Data(d1), Type::Data(d2)) => {
                 // if ctx[d1.base] == ctx[d2.base], then d1.base == d2.base
-                d1.base == d2.base &&
-                    d1.generics.iter().zip(d2.generics.iter()).all(|(x, y)| {
-                        ctx.get_type(*x).is_part_of(ctx.get_type(*y), ctx)
-                    })
-            },
+                d1.base == d2.base
+                    && d1
+                        .generics
+                        .iter()
+                        .zip(d2.generics.iter())
+                        .all(|(x, y)| ctx.get_type(*x).is_part_of(ctx.get_type(*y), ctx))
+            }
             (Type::Int, Type::Int) => true,
             (Type::Type, Type::Type) => true,
             _ => false,

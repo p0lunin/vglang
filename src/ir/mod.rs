@@ -35,7 +35,10 @@ impl Implementations {
         self.data_defs.push(d)
     }
     pub fn extend(&mut self, other: Self) {
-        let Implementations { functions, data_defs } = other;
+        let Implementations {
+            functions,
+            data_defs,
+        } = other;
         self.functions.extend(functions.into_iter());
         self.data_defs.extend(data_defs.into_iter());
     }

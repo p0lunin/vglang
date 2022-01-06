@@ -1,11 +1,11 @@
-use crate::ir::types::Type;
-use std::fmt::{Write, Debug, Formatter};
-use itertools::Itertools;
-use crate::arena::{Id, Arena};
-use crate::common::DisplayScope;
+use crate::arena::{Arena, Id};
 use crate::common::global_context::ScopeCtx;
+use crate::common::DisplayScope;
 use crate::ir::objects::DataDef;
+use crate::ir::types::Type;
 use crate::GlobalCtx;
+use itertools::Itertools;
+use std::fmt::{Debug, Formatter, Write};
 
 pub struct Concrete<T> {
     pub base: Id<T>,
@@ -33,16 +33,21 @@ impl<T> Concrete<T> {
         Concrete { base, generics }
     }
     pub fn base(base: Id<T>) -> Self {
-        Concrete { base, generics: vec![] }
+        Concrete {
+            base,
+            generics: vec![],
+        }
     }
 }
 
 impl Concrete<DataDef> {
     pub fn eq(&self, other: &Concrete<DataDef>, ctx: &ScopeCtx) -> bool {
-        ctx.global.get_data(self.base).ty == ctx.global.get_data(other.base).ty &&
-            self.generics.iter().zip(other.generics.iter()).all(|(x, y)| {
-                ctx.get_type(*x).eq(ctx.get_type(*y), ctx)
-            })
+        ctx.global.get_data(self.base).ty == ctx.global.get_data(other.base).ty
+            && self
+                .generics
+                .iter()
+                .zip(other.generics.iter())
+                .all(|(x, y)| ctx.get_type(*x).eq(ctx.get_type(*y), ctx))
     }
 }
 
@@ -54,7 +59,8 @@ impl<'a> DisplayScope<'a> for Concrete<DataDef> {
         if self.generics.len() != 0 {
             f.write_fmt(format_args!(
                 "<{}>",
-                self.generics.iter()
+                self.generics
+                    .iter()
                     .map(|x| scope.0.get(*x).unwrap().display_value_string(scope))
                     .join(", ")
             ))?;

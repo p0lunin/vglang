@@ -1,4 +1,4 @@
-use crate::common::{Span, Spanned, BinOp};
+use crate::common::{BinOp, Span, Spanned};
 use std::fmt::{Debug, Display, Formatter};
 use std::ops::Deref;
 

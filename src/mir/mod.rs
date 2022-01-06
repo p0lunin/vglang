@@ -38,7 +38,7 @@ pub enum Assigment {
     Map(Vec<Vid>),
     Call(Fid, Vid),
     Alloc(Vid),
-    BinOp(Vid, BinOp, Vid)
+    BinOp(Vid, BinOp, Vid),
 }
 
 pub enum DiscriminantOf {
@@ -59,10 +59,7 @@ pub enum VtyKind {
     Discriminant,
     Int,
     Enum(Eid),
-    Function {
-        args: Vec<Vty>,
-        output: Box<Vty>,
-    }
+    Function { args: Vec<Vty>, output: Box<Vty> },
 }
 
 pub enum Location {

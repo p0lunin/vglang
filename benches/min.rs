@@ -1,5 +1,5 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BatchSize};
-use fsmcreator::{compile_code, GlobalCtx, load_core};
+use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
+use fsmcreator::{compile_code, load_core, GlobalCtx};
 
 pub fn criterion_benchmark(c: &mut Criterion) {
     let code = include_str!("min.vg");
@@ -9,10 +9,8 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("compile_min", |b| {
         b.iter_batched(
             || ctx.clone(),
-            |mut ctx| {
-                compile_code(black_box(code), &mut ctx)
-            },
-            BatchSize::LargeInput
+            |mut ctx| compile_code(black_box(code), &mut ctx),
+            BatchSize::LargeInput,
         )
     });
 }

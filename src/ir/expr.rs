@@ -1,16 +1,16 @@
-use crate::common::{LocalContext, Error, Searchable, Span, Spanned, BinOp, DisplayScope, Find, PathToFind};
-use crate::ir::objects::{Object, Var, DataDef};
+use crate::arena::Id;
+use crate::common::global_context::ScopeCtx;
+use crate::common::{BinOp, DisplayScope, Error, Find, LocalContext, PathToFind, Span, Spanned};
+use crate::interpreter::ByteCode;
+use crate::ir::objects::{DataDef, Object, Var};
 use crate::ir::types::base_types::Function;
-use crate::ir::types::{Type, Concrete};
+use crate::ir::types::{Concrete, Type};
 use crate::syntax::ast::{Ast, Pattern, Token};
 use crate::{ir, syntax, Interpreter};
-use std::collections::HashMap;
-use std::fmt::{Write};
-use std::ops::Deref;
-use crate::interpreter::ByteCode;
-use crate::arena::Id;
-use crate::common::global_context::{ScopeCtx, ScopeCtxInner};
 use smallvec::smallvec;
+use std::collections::HashMap;
+use std::fmt::Write;
+use std::ops::Deref;
 
 #[derive(Debug, Clone)]
 pub struct Expr {
@@ -77,20 +77,23 @@ impl<'a> DisplayScope<'a> for ExprKind {
             Self::Int(i) => f.write_fmt(format_args!("{}", i)),
             Self::BinOp(l, r, op) => {
                 l.kind.display_value(f, scope)?;
-                f.write_fmt(format_args!("{}", op));
+                f.write_fmt(format_args!("{}", op))?;
                 r.kind.display_value(f, scope)?;
                 Ok(())
-            },
+            }
             Self::Application(l, r) => {
                 l.kind.display_value(f, scope)?;
                 f.write_str(" ")?;
                 r.kind.display_value(f, scope)?;
                 Ok(())
-            },
-            Self::Type(ty) => scope.get_type(*ty).display_value(f, &(scope.types(), scope.global)),
-            Self::DataVariant(d, v) => {
-                scope.global.get_data_variant(*d, *v).display_value(f, scope)
-            },
+            }
+            Self::Type(ty) => scope
+                .get_type(*ty)
+                .display_value(f, &(scope.types(), scope.global)),
+            Self::DataVariant(d, v) => scope
+                .global
+                .get_data_variant(*d, *v)
+                .display_value(f, scope),
             x => {
                 dbg!(x);
                 unimplemented!()
@@ -110,25 +113,30 @@ impl Expr {
             BinOp::Add | BinOp::Mul | BinOp::Sub | BinOp::Div | BinOp::Pow => {
                 arithmetic_op(self, other, op, ctx)
                     .map_err(|s| Error::Custom(span, s, "-here".to_string()))
-            },
+            }
             BinOp::And | BinOp::Or => {
                 unimplemented!()
-            },
+            }
             BinOp::Eq | BinOp::NotEq | BinOp::Gr | BinOp::GrOrEq | BinOp::Le | BinOp::LeOrEq => {
                 compare_op(self, other, op, ctx)
                     .map_err(|s| Error::Custom(span, s, "-here".to_string()))
-            },
+            }
         }
     }
     pub fn dot(self, name: String, ctx: &mut ScopeCtx, span: Span) -> Result<Self, Error> {
         match self.kind {
             ExprKind::Ident(i) => {
-                let o = ctx.find(PathToFind::new(name.as_str(), smallvec![i.as_str()]))
-                    .ok_or_else(|| Error::Custom(span, format!("Cannot find {}", i), "-here".into()))?;
+                let o = ctx
+                    .find(PathToFind::new(name.as_str(), smallvec![i.as_str()]))
+                    .ok_or_else(|| {
+                        Error::Custom(span, format!("Cannot find {}", i), "-here".into())
+                    })?;
                 match o {
-                    Object::EnumVariant(id, idx) => {
-                        Ok(Expr::new(ctx.global.get_data(id).get_variant_ty(idx, ctx), span, ExprKind::DataVariant(id, idx)))
-                    }
+                    Object::EnumVariant(id, idx) => Ok(Expr::new(
+                        ctx.global.get_data(id).get_variant_ty(idx, ctx),
+                        span,
+                        ExprKind::DataVariant(id, idx),
+                    )),
                     _ => unimplemented!(),
                 }
             }
@@ -137,16 +145,8 @@ impl Expr {
     }
 }
 
-fn arithmetic_op(
-    left: Expr,
-    right: Expr,
-    op: BinOp,
-    ctx: &ScopeCtx,
-) -> Result<Expr, String> {
-    match (
-        ctx.get_type(left.ty),
-        ctx.get_type(right.ty),
-    ) {
+fn arithmetic_op(left: Expr, right: Expr, op: BinOp, ctx: &ScopeCtx) -> Result<Expr, String> {
+    match (ctx.get_type(left.ty), ctx.get_type(right.ty)) {
         (Type::Int, Type::Int) => Ok(Expr::new(
             // if left.ty == Type::Int we can reuse it.
             left.ty,
@@ -155,21 +155,14 @@ fn arithmetic_op(
         )),
         (x, y) => Err(format!(
             "Arithmetic ops only for ints, got {} and {}",
-            x.display_value_string(&(ctx.types(), ctx.global)), y.display_value_string(&(ctx.types(), ctx.global))
+            x.display_value_string(&(ctx.types(), ctx.global)),
+            y.display_value_string(&(ctx.types(), ctx.global))
         )),
     }
 }
 
-fn compare_op(
-    left: Expr,
-    right: Expr,
-    op: BinOp,
-    ctx: &mut ScopeCtx,
-) -> Result<Expr, String> {
-    match (
-        ctx.get_type(left.ty),
-        ctx.get_type(right.ty),
-    ) {
+fn compare_op(left: Expr, right: Expr, op: BinOp, ctx: &mut ScopeCtx) -> Result<Expr, String> {
+    match (ctx.get_type(left.ty), ctx.get_type(right.ty)) {
         (Type::Int, Type::Int) => Ok(Expr::new(
             // if left.ty == Type::Int we can reuse it.
             ctx.alloc_bool(),
@@ -178,7 +171,8 @@ fn compare_op(
         )),
         (x, y) => Err(format!(
             "Arithmetic ops only for ints, got {} and {}",
-            x.display_value_string(&(ctx.types(), ctx.global)), y.display_value_string(&(ctx.types(), ctx.global))
+            x.display_value_string(&(ctx.types(), ctx.global)),
+            y.display_value_string(&(ctx.types(), ctx.global))
         )),
     }
 }
@@ -189,8 +183,7 @@ fn parse_binary_op(
     ctx: &mut ScopeCtx,
     g: &mut HashMap<String, Option<Id<Type>>>,
     op: BinOp,
-) -> Result<Option<Expr>, Error>
-{
+) -> Result<Option<Expr>, Error> {
     let left = parse_expr(l, ctx, g, None)?;
     let right = parse_expr(r, ctx, g, None)?;
     let (l, r) = match (left, right) {
@@ -202,7 +195,12 @@ fn parse_binary_op(
     Expr::bin_op(l, r, op, ctx).map(Some)
 }
 
-fn assert_types_equal(this: Id<Type>, expected: Option<Id<Type>>, span: Span, ctx: &ScopeCtx) -> Result<(), Error> {
+fn assert_types_equal(
+    this: Id<Type>,
+    expected: Option<Id<Type>>,
+    span: Span,
+    ctx: &ScopeCtx,
+) -> Result<(), Error> {
     match expected {
         Some(ex) => {
             let this = ctx.get_type(this);
@@ -216,12 +214,16 @@ fn assert_types_equal(this: Id<Type>, expected: Option<Id<Type>>, span: Span, ct
                     //dbg!(ex.display_value_string(&(&ctx.types, ctx.global)));
                     Err(Error::Custom(
                         span,
-                        format!("Expected {}, found {} type", ex.display_value_string(&(ctx.types(), ctx.global)), this.display_value_string(&(ctx.types(), ctx.global))),
+                        format!(
+                            "Expected {}, found {} type",
+                            ex.display_value_string(&(ctx.types(), ctx.global)),
+                            this.display_value_string(&(ctx.types(), ctx.global))
+                        ),
                         "-here".to_owned(),
                     ))
-                },
+                }
             }
-        },
+        }
         None => Ok(()),
     }
 }
@@ -235,9 +237,7 @@ pub fn parse_type(token: &Token, ctx: &mut ScopeCtx) -> Result<Id<Type>, Error> 
     let ex = Some(ctx.alloc_type(Type::Type));
     parse_expr(token, ctx, &mut HashMap::new(), ex)
         .and_then(|e| e.ok_or_else(|| Error::cannot_infer_type(token.span)))
-        .and_then(|e| {
-            interpret_expr_as_ty(e, ctx)
-        })
+        .and_then(|e| interpret_expr_as_ty(e, ctx))
 }
 
 pub fn interpret_expr_as_ty(e: Expr, ctx: &mut ScopeCtx) -> Result<Id<Type>, Error> {
@@ -250,7 +250,7 @@ pub fn interpret_expr_as_ty(e: Expr, ctx: &mut ScopeCtx) -> Result<Id<Type>, Err
     match e2 {
         ByteCode::Type(ty) => Ok(ty.clone()),
         ByteCode::DataType(ty) => Ok(ctx.alloc_type(Type::Data(ty))),
-        _ => unimplemented!()
+        _ => unimplemented!(),
     }
 }
 
@@ -274,27 +274,14 @@ pub fn parse_expr(
     match &token.ast {
         Ast::Int(i) => check_type(Expr::int(*i, token.span, ctx), expected, ctx),
         Ast::BinOp(l, r, op) => {
-            match parse_binary_op(
-                l.as_ref(),
-                r.as_ref(),
-                ctx,
-                g,
-                op.clone(),
-            )? {
-                Some(e) => {
-                    check_type(e, expected, ctx)
-                },
+            match parse_binary_op(l.as_ref(), r.as_ref(), ctx, g, op.clone())? {
+                Some(e) => check_type(e, expected, ctx),
                 None => Ok(None),
             }
         }
         Ast::Neg(t) => {
             let ex = ctx.alloc_type(Type::Int);
-            let expr = parse_expr(
-                t,
-                ctx,
-                &mut HashMap::new(),
-                Some(ex)
-            )?;
+            let expr = parse_expr(t, ctx, &mut HashMap::new(), Some(ex))?;
             match expr {
                 Some(e) => Ok(Some(Expr::new(
                     e.ty,
@@ -324,7 +311,7 @@ pub fn parse_expr(
                     None => match ctx.find(PathToFind::name(i.as_str())) {
                         Some(o) => {
                             Expr::new(o.get_type(ctx), token.span, ExprKind::Ident(i.clone()))
-                        },
+                        }
                         None => {
                             return Err(Error::Custom(
                                 token.span,
@@ -340,7 +327,7 @@ pub fn parse_expr(
         }
         Ast::Val => {
             todo!()
-        },
+        }
         Ast::Slice(_) => unimplemented!(),
         Ast::Implication(l, r) => {
             let exp = Some(ctx.alloc_type(Type::Type));
@@ -360,13 +347,9 @@ pub fn parse_expr(
             let r = interpret_expr_as_ty(right, ctx)?;
             let f = ctx.alloc_type(Type::Function(Function {
                 get_value: l,
-                return_value: r
+                return_value: r,
             }));
-            let expr = Expr::new(
-                ctx.alloc_type(Type::Type),
-                token.span,
-                ExprKind::Type(f)
-            );
+            let expr = Expr::new(ctx.alloc_type(Type::Type), token.span, ExprKind::Type(f));
             check_type(expr, expected, ctx)
         }
         Ast::Named(_name, _ty) => {
@@ -384,26 +367,21 @@ pub fn parse_expr(
             let right = parse_expr(right.as_ref(), ctx, g, None)?;
             match right {
                 Some(right) => {
-                    let ex_ret = expected.clone().unwrap_or_else(|| ctx.alloc_type(Type::Unknown(None)));
+                    let ex_ret = expected
+                        .clone()
+                        .unwrap_or_else(|| ctx.alloc_type(Type::Unknown(None)));
                     let ex = ctx.alloc_type(Type::Function(Function {
                         get_value: right.ty,
                         return_value: ex_ret,
                     }));
-                    let left = parse_expr(
-                        left,
-                        ctx,
-                        g,
-                        Some(ex),
-                    )?;
+                    let left = parse_expr(left, ctx, g, Some(ex))?;
                     match left {
                         Some(left) => {
                             let expr_ty = {
                                 let left_ty = ctx.get_type(left.ty);
                                 match left_ty {
-                                    Type::Function(f) => {
-                                        f.return_value
-                                    }
-                                    _ => unreachable!()
+                                    Type::Function(f) => f.return_value,
+                                    _ => unreachable!(),
                                 }
                             };
                             let e = Expr::new(
@@ -412,7 +390,7 @@ pub fn parse_expr(
                                 ExprKind::Application(Box::new(left), Box::new(right)),
                             );
                             check_type(e, expected, ctx)
-                        },
+                        }
                         None => Err(Error::cannot_infer_type(token.span)),
                     }
                 }
@@ -453,10 +431,7 @@ pub fn parse_expr(
                     // types stored independently from scope.
                     ctx.leave_scope();
 
-                    Ok((
-                        ir::patmat::Pattern::parse(arm.pat.clone()),
-                        ex
-                    ))
+                    Ok((ir::patmat::Pattern::parse(arm.pat.clone()), ex))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             let ty = arms
@@ -472,7 +447,11 @@ pub fn parse_expr(
                         true => Ok(()),
                         false => Err(Error::custom(
                             token.span,
-                            format!("Expected type {} but found {}", arm1_ty.display_value_string(&(ctx.types(), ctx.global)), this_arm_ty.display_value_string(&(ctx.types(), ctx.global))),
+                            format!(
+                                "Expected type {} but found {}",
+                                arm1_ty.display_value_string(&(ctx.types(), ctx.global)),
+                                this_arm_ty.display_value_string(&(ctx.types(), ctx.global))
+                            ),
                         )),
                     }
                 })
@@ -515,18 +494,21 @@ fn infer_ty(ty_id: Id<Type>, expected_id: Id<Type>, ctx: &mut ScopeCtx) -> Id<Ty
                 get_value: l,
                 return_value: r,
             }))
-        },
+        }
         (Type::Data(d), Type::Data(ed)) => {
-            ctx.alloc_type(Type::Data(Concrete::new(
+            let ty = Type::Data(Concrete::new(
                 d.base,
-                d.generics.iter().zip(ed.generics.iter()).map(|(ty, ety)| {
-                    match ctx.get_type(*ty) {
+                d.generics
+                    .iter()
+                    .zip(ed.generics.iter())
+                    .map(|(ty, ety)| match ctx.get_type(*ty) {
                         Type::Unknown(_) => ety.clone(),
-                        _ => ty.clone()
-                    }
-                }).collect()
-            )))
-        },
+                        _ => ty.clone(),
+                    })
+                    .collect(),
+            ));
+            ctx.alloc_type(ty)
+        }
         _ => ty_id,
     }
 }
@@ -543,23 +525,28 @@ fn clarify_generics(mut ty: Id<Type>, expected: Id<Type>, ctx: &mut ScopeCtx) ->
     ty
 }
 
-fn generics_map(ty: Id<Type>, expected: Id<Type>, gens: &mut HashMap<String, Id<Type>>, ctx: &ScopeCtx) {
+fn generics_map(
+    ty: Id<Type>,
+    expected: Id<Type>,
+    gens: &mut HashMap<String, Id<Type>>,
+    ctx: &ScopeCtx,
+) {
     match (ctx.get_type(ty), ctx.get_type(expected)) {
         (Type::Unknown(Some(g)), _) => {
             if !gens.contains_key(g.name.as_ref()) {
                 gens.insert(g.name.as_ref().clone(), expected.clone());
             }
-        },
+        }
         (Type::Function(f), Type::Function(ef)) => {
             generics_map(f.get_value.clone(), ef.get_value.clone(), gens, ctx);
             generics_map(f.return_value.clone(), ef.return_value.clone(), gens, ctx);
-        },
-        (Type::Data(d), Type::Data(ed)) => {
-            d.generics.iter().zip(ed.generics.iter()).for_each(|(g, ge)| {
-                generics_map(g.clone(), ge.clone(), gens, ctx)
-            })
         }
-        _ => { },
+        (Type::Data(d), Type::Data(ed)) => d
+            .generics
+            .iter()
+            .zip(ed.generics.iter())
+            .for_each(|(g, ge)| generics_map(g.clone(), ge.clone(), gens, ctx)),
+        _ => {}
     }
 }
 
@@ -612,13 +599,14 @@ fn parse_let_expr(
                 };
                 match g.get(var.as_str()) {
                     Some(Some(inferred)) => {
+                        let inferred = *inferred;
                         let var = Var {
                             name: var.as_ref().clone(),
-                            ty: inferred.clone(),
+                            ty: inferred,
                         };
                         ctx.enter_scope();
                         ctx.alloc_var(var.clone());
-                        let exp = parse_expr(assign, ctx, g, Some(inferred.clone()))?;
+                        let exp = parse_expr(assign, ctx, g, Some(inferred))?;
                         ctx.leave_scope();
                         match exp {
                             Some(assigned) => {
@@ -661,53 +649,56 @@ fn create_scope_objects(
     pattern_type: Id<Type>,
 ) -> Result<(), Error> {
     match pattern.deref() {
-        Pattern::Otherwise => {
-            Ok(())
-        }
+        Pattern::Otherwise => Ok(()),
         Pattern::Bind(s, b) => {
             ctx.alloc_var(Var::new(s.as_str().into(), pattern_type));
             create_scope_objects(b.as_ref(), ctx, pattern_type)
         }
-        Pattern::Variant(path, pats) => {
-            match ctx.find(PathToFind::from_path(path)) {
-                Some(Object::EnumVariant(id, idx)) => {
-                    let types = {
-                        let concrete = match ctx.get_type(pattern_type) {
-                            Type::Data(d) => d.clone(),
-                            _ => {
-                                unreachable!()
-                            }
-                        };
-                        let mut types = ctx.global.get_data_variant(id, idx).data(ctx);
-                        for (gen, gen_ty) in ctx.global.get_data(concrete.base).ty.generics.iter().zip(concrete.generics.iter()) {
-                            types.iter_mut().for_each(|x| {
-                                *x = Type::update_set_generic_func(*x, gen.name.as_str(), *gen_ty, ctx);
-                            });
+        Pattern::Variant(path, pats) => match ctx.find(PathToFind::from_path(path)) {
+            Some(Object::EnumVariant(id, idx)) => {
+                let types = {
+                    let concrete = match ctx.get_type(pattern_type) {
+                        Type::Data(d) => d.clone(),
+                        _ => {
+                            unreachable!()
                         }
-                        types
                     };
-                    match types.len() == pats.len() {
-                        true => {
-                            for (pat, ty) in pats.iter().zip(types.iter()) {
-                                create_scope_objects(pat, ctx, ty.clone())?
-                            }
-                            Ok(())
-                        },
-                        false => {
-                            return Err(Error::custom(
-                                pattern.span,
-                                format!("Expected {} patterns, found {}", types.len(), pats.len()),
-                            ))
+                    let mut types = ctx.global.get_data_variant(id, idx).data(ctx);
+                    for (gen, gen_ty) in ctx
+                        .global
+                        .get_data(concrete.base)
+                        .ty
+                        .generics
+                        .iter()
+                        .zip(concrete.generics.iter())
+                    {
+                        types.iter_mut().for_each(|x| {
+                            *x = Type::update_set_generic_func(*x, gen.name.as_str(), *gen_ty, ctx);
+                        });
+                    }
+                    types
+                };
+                match types.len() == pats.len() {
+                    true => {
+                        for (pat, ty) in pats.iter().zip(types.iter()) {
+                            create_scope_objects(pat, ctx, ty.clone())?
                         }
+                        Ok(())
+                    }
+                    false => {
+                        return Err(Error::custom(
+                            pattern.span,
+                            format!("Expected {} patterns, found {}", types.len(), pats.len()),
+                        ))
                     }
                 }
-                Some(_) => unimplemented!(),
-                None => return Err(Error::custom(pattern.span, format!("{} not found", path))),
             }
+            Some(_) => unimplemented!(),
+            None => return Err(Error::custom(pattern.span, format!("{} not found", path))),
         },
         Pattern::Ident(s) => {
             ctx.alloc_var(Var::new(s.clone(), pattern_type.clone()));
             Ok(())
-        },
+        }
     }
 }

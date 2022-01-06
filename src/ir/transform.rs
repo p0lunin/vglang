@@ -1,14 +1,13 @@
-use crate::common::{LocalContext, Error, Spanned};
+use crate::arena::Id;
+use crate::common::global_context::{GlobalCtx, ScopeCtx};
+use crate::common::{Error, Spanned};
 use crate::ir::expr::{parse_expr, parse_type};
-use crate::ir::objects::{Arg, DataDef, FunctionDefinition, FunctionObject, Object};
+use crate::ir::objects::{Arg, DataDef, FunctionDefinition, FunctionObject};
 use crate::ir::types::{Generic, Type};
-use crate::ir::{expr, Implementations, Expr};
+use crate::ir::Expr;
 use crate::syntax::ast::{FunctionDef, FunctionImpl, TopLevelToken};
 use itertools::Itertools;
 use std::collections::{HashMap, VecDeque};
-use std::rc::Rc;
-use crate::common::global_context::{GlobalCtx, ScopeCtx, ScopeCtxInner};
-use crate::arena::Id;
 
 pub fn parse_function(
     def: FunctionDef,
@@ -23,15 +22,10 @@ pub fn parse_function(
     let FunctionImpl(impl_name, args, body) = fimpl;
 
     let mut ty_scope = ScopeCtx::new(ctx);
-    generics
-        .into_iter()
-        .for_each(|g| {
-            ty_scope.alloc_generic(Generic::parse(g.inner()));
-        });
-    let func_type = parse_type(
-        type_def.as_ref(),
-        &mut ty_scope,
-    )?;
+    generics.into_iter().for_each(|g| {
+        ty_scope.alloc_generic(Generic::parse(g.inner()));
+    });
+    let func_type = parse_type(type_def.as_ref(), &mut ty_scope)?;
 
     let count_args = ty_scope.get_type(func_type).count_args(&ty_scope);
     let arg_types = Type::args_types(func_type, &ty_scope);
@@ -50,18 +44,25 @@ pub fn parse_function(
                     let id = Type::move_into_scope(
                         ty_scope.get_type(t),
                         ty_scope.types(),
-                        &mut body_scope.types
+                        &mut body_scope.types,
                     );
                     body_scope.alloc_arg(Arg { name, ty: id });
                 });
-            let f_return_type = ty_scope.get_type(func_type).get_return_value(&ty_scope).move_into_scope(ty_scope.types(), &mut body_scope.types);
+            let f_return_type = ty_scope
+                .get_type(func_type)
+                .get_return_value(&ty_scope)
+                .move_into_scope(ty_scope.types(), &mut body_scope.types);
             let body_scope = body_scope.inner();
-            let f_id = ctx.alloc_func(FunctionObject {
-                def: FunctionDefinition { name, ftype: func_type },
+            let f = FunctionObject {
+                def: FunctionDefinition {
+                    name,
+                    ftype: func_type,
+                },
                 args: body_scope.args.iter().cloned().collect(),
                 body: Expr::empty(),
                 ctx: ty_scope.inner(),
-            });
+            };
+            let f_id = ctx.alloc_func(f);
             let mut body_scope = ScopeCtx::from_inner(ctx, body_scope);
             let (expr, inner) = {
                 let expr_res = parse_expr(
@@ -88,36 +89,6 @@ pub fn parse_function(
     }
 }
 
-/*
-fn initialize_bool() -> (AllObject, Rc<Spanned<Type>>) {
-      const BOOL: AllObject = AllObject::Enum(Rc::new(EnumType::from_ast(EnumDecl {
-            name: Spanned::new("Bool".to_owned(), Span::new(0, 0)),
-            variants: vec![
-                Spanned::new(EnumVariant {
-                    name: Spanned::new("True".to_owned(), Span::new(0, 0)),
-                    kind: EnumVariantKind::Unit
-                }, Span::new(0, 0)),
-                Spanned::new(EnumVariant {
-                    name: Spanned::new("False".to_owned(), Span::new(0, 0)),
-                    kind: EnumVariantKind::Unit
-                }, Span::new(0, 0)),
-            ]
-        }, &Context { objects: vec![], parent: None }).unwrap()));
-    };
-    lazy_static! {
-        static ref BOOL_TYPE: Rc<Spanned<Type>> = BOOL.call();
-    };
-    (BOOL, BOOL_TYPE)
-}
-
-fn get_bool_enum() -> AllObject {
-    initialize_bool().0
-}
-
-fn get_bool_type() -> Rc<Spanned<Type>> {
-    initialize_bool().1
-}*/
-
 pub fn parse_tokens(
     tokens: Vec<Spanned<TopLevelToken>>,
     global: &mut GlobalCtx,
@@ -142,11 +113,9 @@ pub fn parse_tokens(
             TopLevelToken::NewLine | TopLevelToken::Comment => {}
             TopLevelToken::FunctionDef(f) => function_defs.push(f),
             TopLevelToken::FunctionImpl(i) => function_impls.push_front(i),
-            TopLevelToken::EnumDecl(e) => {
-                match DataDef::parse(e, global) {
-                    Ok(_) => { }
-                    Err(e) => errors.push(e),
-                }
+            TopLevelToken::EnumDecl(e) => match DataDef::parse(e, global) {
+                Ok(_) => {}
+                Err(e) => errors.push(e),
             },
         }
     });
@@ -168,10 +137,8 @@ pub fn parse_tokens(
         match parse_function(d, fimpl, global) {
             Ok(id) => {
                 ids.push(id);
-            },
-            Err(e) => {
-                errors.push(e)
-            },
+            }
+            Err(e) => errors.push(e),
         }
     });
 

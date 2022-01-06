@@ -1,5 +1,5 @@
 use crate::{
-    common::{Span, Spanned, BinOp},
+    common::{BinOp, Span, Spanned},
     syntax::ast::*,
 };
 

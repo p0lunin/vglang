@@ -1,30 +1,29 @@
+mod arena;
 mod common;
 pub mod interpreter;
 mod ir;
 mod syntax;
-mod arena;
 // mod lir;
 mod mir;
 
 pub use crate::ir::Implementations;
-pub use interpreter::Interpreter;
 pub use common::global_context::{GlobalCtx, ScopeCtx};
 pub use common::DisplayScope;
+pub use interpreter::Interpreter;
 
-use crate::common::{peg_error_to_showed, LocalContext};
+use crate::arena::Id;
+use crate::common::peg_error_to_showed;
 use crate::interpreter::ByteCode;
-use crate::ir::objects::{Object, FunctionObject};
+use crate::ir::objects::FunctionObject;
 use crate::ir::parse_tokens;
 use crate::syntax::{parse_text, parse_token};
 use itertools::Itertools;
 use std::fs::File;
 use std::io::Read;
-use crate::common::global_context::{ScopeCtxInner};
-use crate::arena::Id;
 
 pub fn compile_file(
     path_to_file: &str,
-    global: &mut GlobalCtx
+    global: &mut GlobalCtx,
 ) -> Result<Vec<Id<FunctionObject>>, String> {
     let mut file = match File::open(path_to_file) {
         Ok(f) => f,
@@ -37,7 +36,10 @@ pub fn compile_file(
     compile_code(data.as_str(), global)
 }
 
-pub fn compile_code<'a>(code: &str, global: &mut GlobalCtx) -> Result<Vec<Id<FunctionObject>>, String> {
+pub fn compile_code<'a>(
+    code: &str,
+    global: &mut GlobalCtx,
+) -> Result<Vec<Id<FunctionObject>>, String> {
     let ast = match parse_text(&code) {
         Ok(d) => d,
         Err(e) => {
@@ -60,6 +62,5 @@ pub fn eval(interpreter: &mut Interpreter, text: &str) -> Result<ByteCode, Strin
 
 pub fn load_core(global: &mut GlobalCtx) -> Vec<Id<FunctionObject>> {
     let core = include_str!("../core/core.vg");
-    compile_code(core, global)
-        .expect("Core should be valid")
+    compile_code(core, global).expect("Core should be valid")
 }

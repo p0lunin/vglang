@@ -1,12 +1,12 @@
-use crate::common::{Error, PathToFind, Find, DisplayScope};
-use crate::ir::objects::{Object};
+use crate::arena::{Arena, Id};
+use crate::common::global_context::{GlobalCtx, ScopeCtx};
+use crate::common::{DisplayScope, Error, Find, PathToFind};
+use crate::ir::expr::parse_type;
+use crate::ir::objects::Object;
 use crate::ir::types::base_types::Function;
-use crate::ir::types::{Generic, Type, Concrete};
+use crate::ir::types::{Concrete, Generic, Type};
 use crate::syntax::ast::{EnumDecl, EnumVariant, Token};
 use std::fmt::{Debug, Write};
-use crate::ir::expr::{parse_type};
-use crate::arena::{Id, Arena};
-use crate::common::global_context::{ScopeCtx, GlobalCtx};
 
 #[derive(Debug, Clone)]
 pub struct DataType {
@@ -23,7 +23,11 @@ impl PartialEq for DataType {
 
 impl DataType {
     pub fn new(name: String, generics: Arena<Generic>) -> Self {
-        DataType { name, generics, local_types: Arena::new() }
+        DataType {
+            name,
+            generics,
+            local_types: Arena::new(),
+        }
     }
     pub fn as_ty(&self, ctx: &mut ScopeCtx) -> Id<Type> {
         data_ty(self.generics.as_slice(), ctx)
@@ -40,7 +44,7 @@ fn data_ty<T>(generics: &[T], ctx: &mut ScopeCtx) -> Id<Type> {
                 get_value: g,
                 return_value: r,
             }))
-        },
+        }
     }
 }
 
@@ -48,7 +52,7 @@ impl<'a> DisplayScope<'a> for DataType {
     type Scope = ();
 
     fn display_value(&self, f: &mut impl Write, _: &Self::Scope) -> std::fmt::Result {
-       write!(f, "{}", self.name)
+        write!(f, "{}", self.name)
     }
 }
 
@@ -77,22 +81,14 @@ impl DataDef {
             ty,
             variants: vec![],
         });
-        let mut scope_ctx = ScopeCtx::new(
-            ctx
-        );
-        ctx.get_data(data_id)
-            .ty
-            .generics
-            .iter()
-            .for_each(|g| {
-                scope_ctx.alloc_generic(g.clone());
-            });
+        let mut scope_ctx = ScopeCtx::new(ctx);
+        ctx.get_data(data_id).ty.generics.iter().for_each(|g| {
+            scope_ctx.alloc_generic(g.clone());
+        });
 
         let variants = variants
             .into_iter()
-            .map(|v| {
-                DataVariant::parse(v.inner(), data_id, &mut scope_ctx)
-            })
+            .map(|v| DataVariant::parse(v.inner(), data_id, &mut scope_ctx))
             .collect::<Result<Vec<_>, _>>()?;
 
         let local_types = scope_ctx.inner().types;
@@ -114,10 +110,7 @@ impl DataDef {
             .iter()
             .map(|g| ctx.alloc_type(Type::Unknown(Some(g.clone()))))
             .collect();
-        let mut ty = ctx.alloc_type(Type::Data(Concrete::new(
-            v.dty,
-            gens
-        )));
+        let mut ty = ctx.alloc_type(Type::Data(Concrete::new(v.dty, gens)));
         for t in v.data.iter().rev() {
             let tt = self.ty.local_types.get(t.clone()).unwrap();
             let g = match tt {
@@ -150,8 +143,8 @@ impl<'a> Find for (Id<DataDef>, &'a DataDef) {
                 } else {
                     None
                 }
-            },
-            [..] => None
+            }
+            [..] => None,
         }
     }
 }
@@ -183,20 +176,24 @@ impl DataVariant {
             name: name.inner(),
             data: datas
                 .into_iter()
-                .map(|t| {
-                    parse_type(&t, ctx)
-                })
+                .map(|t| parse_type(&t, ctx))
                 .collect::<Result<Vec<_>, _>>()?,
         })
     }
 
     pub fn data(&self, ctx: &mut ScopeCtx) -> Vec<Id<Type>> {
         let dty = ctx.global.get_data(self.dty);
-        self.data.iter().map(|x| {
-            dty.ty.local_types.get(*x).unwrap()
-                .clone().move_into_scope(&dty.ty.local_types, &mut ctx.types)
-        }
-        ).collect()
+        self.data
+            .iter()
+            .map(|x| {
+                dty.ty
+                    .local_types
+                    .get(*x)
+                    .unwrap()
+                    .clone()
+                    .move_into_scope(&dty.ty.local_types, &mut ctx.types)
+            })
+            .collect()
     }
 }
 

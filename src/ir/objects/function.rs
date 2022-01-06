@@ -1,12 +1,12 @@
-use crate::common::{Spanned, Find, PathToFind, DisplayScope};
+use crate::arena::{Arena, Id};
+use crate::common::global_context::ScopeCtxInner;
+use crate::common::{DisplayScope, Find, PathToFind, Spanned};
 use crate::ir::expr::Expr;
-use crate::ir::objects::{Arg};
-use crate::ir::types::{Type, Concrete};
-use std::fmt::{Write};
-use crate::arena::{Id, Arena};
-use crate::common::global_context::{ScopeCtx, ScopeCtxInner};
-use crate::GlobalCtx;
+use crate::ir::objects::Arg;
 use crate::ir::types::base_types::Function;
+use crate::ir::types::{Concrete, Type};
+use crate::GlobalCtx;
+use std::fmt::Write;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct FunctionDefinition {
@@ -66,15 +66,10 @@ fn fty(ty: Id<Type>, old: &Arena<Type>, new: &mut Arena<Type>) -> Id<Type> {
             }))
         }
         Type::Data(Concrete { base, generics }) => {
-            let gens = generics.iter().cloned().map(|x| {
-                fty(x, old, new)
-            }).collect();
-            new.alloc(Type::Data(Concrete::new(
-                *base,
-                gens
-            )))
+            let gens = generics.iter().cloned().map(|x| fty(x, old, new)).collect();
+            new.alloc(Type::Data(Concrete::new(*base, gens)))
         }
-        x => new.alloc(x.clone())
+        x => new.alloc(x.clone()),
     }
 }
 
@@ -84,8 +79,7 @@ impl Find for (Id<FunctionObject>, &FunctionObject) {
     fn find(&self, path: PathToFind) -> Option<Self::Item> {
         match path.has_segments() {
             true => None,
-            false => (self.1.def.name.as_str() == path.endpoint)
-                .then(|| self.0)
+            false => (self.1.def.name.as_str() == path.endpoint).then(|| self.0),
         }
     }
 }

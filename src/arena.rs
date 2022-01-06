@@ -1,7 +1,7 @@
-use std::marker::PhantomData;
-use std::fmt::{Debug, Formatter};
 use crate::common::{Find, PathToFind};
+use std::fmt::{Debug, Formatter};
 use std::iter::FromIterator;
+use std::marker::PhantomData;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Arena<T> {
@@ -10,9 +10,7 @@ pub struct Arena<T> {
 
 impl<T> Arena<T> {
     pub fn new() -> Self {
-        Arena {
-            items: vec![],
-        }
+        Arena { items: vec![] }
     }
     pub fn alloc(&mut self, object: T) -> Id<T> {
         let id = self.next_id();
@@ -44,7 +42,9 @@ impl<T> Arena<T> {
         self.items.len()
     }
     pub fn remove_lasts(&mut self, remove_count: usize) {
-        self.items.drain(self.items.len()-remove_count..).for_each(|_| ());
+        self.items
+            .drain(self.items.len() - remove_count..)
+            .for_each(|_| ());
     }
     #[inline(always)]
     pub fn pop(&mut self) {
@@ -54,9 +54,12 @@ impl<T> Arena<T> {
         self.items.iter()
     }
     pub fn iter_with_ids(&self) -> impl DoubleEndedIterator<Item = (Id<T>, &T)> {
-        self.items.iter().enumerate().map(|(id, x)| (Id::new(id), x))
+        self.items
+            .iter()
+            .enumerate()
+            .map(|(id, x)| (Id::new(id), x))
     }
-    pub fn extend_by(&mut self, other: Arena<T>)  {
+    pub fn extend_by(&mut self, other: Arena<T>) {
         self.items.extend(other.items)
     }
 }
@@ -73,9 +76,9 @@ where
 }
 
 impl<A> FromIterator<A> for Arena<A> {
-    fn from_iter<T: IntoIterator<Item=A>>(iter: T) -> Self {
+    fn from_iter<T: IntoIterator<Item = A>>(iter: T) -> Self {
         Self {
-            items: iter.into_iter().collect()
+            items: iter.into_iter().collect(),
         }
     }
 }
@@ -105,7 +108,7 @@ impl<T> Clone for Id<T> {
         Id(self.0.clone(), PhantomData)
     }
 }
-impl<T> Copy for Id<T> { }
+impl<T> Copy for Id<T> {}
 
 impl<T> Id<T> {
     #[inline(always)]

@@ -23,7 +23,7 @@ impl Display for BinOp {
             BinOp::Add => f.write_str("+"),
             BinOp::Gr => f.write_str(">"),
             BinOp::Le => f.write_str("<"),
-            _ => unimplemented!()
+            _ => unimplemented!(),
         }
     }
 }
