@@ -14,29 +14,35 @@ impl Scope {
     }
 }
 
-pub(super)struct Var {
+#[derive(Debug, Clone)]
+pub(super) struct Var {
     pub size: Bytes,
-    pub location: Location,
+    pub location: VarTy,
 }
 
 impl Var {
     pub fn new(size: usize) -> Self {
-        Var { size, location: Location::Stack }
+        Var { size, location: VarTy::Stack }
     }
 }
 
-pub(super) enum Location {
+pub(super) enum VarTy {
     Stack,
-    Heap,
-    GcHeap,
+    Heap
 }
 
 #[derive(Debug, Clone)]
 pub(super) enum Op {
-    Move {
+    Copy {
         source: Id,
         destination: Id,
-        on: OnMove,
+    },
+    Alloc {
+        size: Bytes,
+        destination: Id,
+    },
+    Dealloc {
+        address: usize,
     },
     Write {
         value: Box<[u8]>,
@@ -48,12 +54,6 @@ pub(super) enum Op {
         jump: OpId,
     },
     Exit,
-}
-
-#[derive(Debug, Clone)]
-pub(super) enum OnMove {
-    Move,
-    Copy,
 }
 
 pub(super) struct Program {
@@ -70,20 +70,10 @@ impl Program {
 #[cfg(test)]
 #[macro_export]
 macro_rules! program {
-    (@inner mv $source:literal $dest:literal) => {
-        {
-            Op::Move {
-               source: $source,
-                destination: $dest,
-                on: OnMove::Move,
-            }
-        }
-    };
     (@inner cp $source:literal $dest:literal) => {{
-        Op::Move {
+        Op::Copy {
             source: $source,
             destination: $dest,
-            on: OnMove::Copy,
         }
     }};
     (@inner wr $value:expr => $dest:literal) => {{
@@ -96,7 +86,7 @@ macro_rules! program {
         Op::CaseArm {
             pattern: $pat,
             matched: $matched,
-            jump: crate::mir::op::OpId($jump),
+            jump: crate::lir::op::OpId($jump),
         }
     }};
     (@inner ex) => {{

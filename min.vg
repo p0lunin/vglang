@@ -5,6 +5,20 @@ caseFoo: Foo -> Int
 caseFoo x = case x of
     Foo.A => 1
     Foo.B v => v ?>
+// --------------
+// caseFoo(_0): Enum[Foo]) -> Int
+// _1 = D[_0] // discriminant of x
+// _2 = D[Foo.A]
+// case _1 _2 {
+//  _3 = 1
+//  ret _3
+// }
+// _3 = D[Foo.B]
+// case _1 _3 {
+//  _4 = F[Foo.B|0] _0
+//  ret _4
+// }
+//
 
 makeA: Foo
 makeA = Foo.A
@@ -17,6 +31,12 @@ add1 x = x + 1
 
 call: Int -> (Int -> Int -> Int) -> Int
 call x f = x `f` 1
+// -----------
+// call(_0: Int, _1: *func(Int, Int, Int)) -> Int
+// _2 = 1
+// _3 = @map[_0, _2]
+// _4 = @call _1 _3
+// ret _4
 
 let': Int -> Int
 let' x = let foo = x + 1 in foo + 1
@@ -65,6 +85,29 @@ gen: Int -> List Int
 gen x = case x == 0 of
     Bool.True => nil
     Bool.False => cons x (gen (x - 1)) ?>
+// --------------
+// gen(_0: Int) -> ListInt
+// _1 = 0
+// _2 = _0 == _1
+// _3 = D[Bool.False]
+// case _2 _3 {
+//  _4 = D[List.Nil]
+//  _5 = @map [_4]
+//  ret _6
+// }
+// _4 = D[Bool.True]
+// case _2 _4 {
+//  _5 = 1
+//  _6 = _0 - _5
+//  _7 = @map[_6]
+//  _8 = gen
+//  _9 = @call _8 _7
+//  _10 = @alloc _9
+//  _11 = D[List.Cons]
+//  _12 = @map[_11 _0 _10] // List.Cons x gen(x - 1)
+//  ret _12
+// }
+//
 
 /*
 trait Foo a where
