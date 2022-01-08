@@ -7,13 +7,6 @@ use crate::mir::ctx::{Id, Eid, Fid, Ctx};
 #[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub struct Vid(pub Id); // variable
 
-#[cfg(test)]
-impl Vid {
-    pub fn new(id: Id) -> Self {
-        Vid(id)
-    }
-}
-
 pub struct Function {
     args: Vec<Variable>,
     out_ty: Vty,
@@ -216,46 +209,46 @@ impl<'a> ProgramBuilder<'a> {
         self
     }
     pub fn var(mut self, ass: Assigment) -> Self {
-        let vid = Vid::new(self.next_id());
+        let vid = Vid(self.next_id());
         let ty = ass.get_var_ty(self.ctx, &self.vars);
         self.vars.push(ty.clone());
         self.add(Statement::Variable(Variable::new(ty, vid), ass))
     }
-    pub fn return_(mut self, id: Vid) -> (Vec<Statement>, Vec<Vty>) {
+    pub fn return_(self, id: Vid) -> (Vec<Statement>, Vec<Vty>) {
         let program = self.add(Statement::Return(id));
         (program.statements, program.vars)
     }
-    pub fn dealloc(mut self, id: Vid) -> Self {
+    pub fn dealloc(self, id: Vid) -> Self {
         self.add(Statement::Dealloc(id))
     }
-    pub fn function_ass(mut self, id: Fid) -> Self {
+    pub fn function_ass(self, id: Fid) -> Self {
         self.var(Assigment::Function(id))
     }
-    pub fn discriminant_ass(mut self, d: DiscriminantOf) -> Self {
+    pub fn discriminant_ass(self, d: DiscriminantOf) -> Self {
         self.var(Assigment::Discriminant(d))
     }
-    pub fn field_ass(mut self, d: DiscriminantOf) -> Self {
+    pub fn field_ass(self, d: DiscriminantOf) -> Self {
         self.var(Assigment::Discriminant(d))
     }
-    pub fn map_ass(mut self, eid: Eid, disc: Vid, values: Vec<Vid>) -> Self {
+    pub fn map_ass(self, eid: Eid, disc: Vid, values: Vec<Vid>) -> Self {
         self.var(Assigment::Map(eid, disc, values))
     }
-    pub fn call_ass(mut self, fid: Fid, values: Vec<Vid>) -> Self {
+    pub fn call_ass(self, fid: Fid, values: Vec<Vid>) -> Self {
         self.var(Assigment::Call(fid, values))
     }
-    pub fn alloc_ass(mut self, id: Vid) -> Self {
+    pub fn alloc_ass(self, id: Vid) -> Self {
         self.var(Assigment::Alloc(id))
     }
-    pub fn clone_ass(mut self, id: Vid) -> Self {
+    pub fn clone_ass(self, id: Vid) -> Self {
         self.var(Assigment::Clone(id))
     }
-    pub fn deref_ass(mut self, id: Vid) -> Self {
+    pub fn deref_ass(self, id: Vid) -> Self {
         self.var(Assigment::Dereference(id))
     }
-    pub fn int_ass(mut self, value: i128) -> Self {
+    pub fn int_ass(self, value: i128) -> Self {
         self.var(Assigment::Value(Value::Int(value)))
     }
-    pub fn unit_ass(mut self) -> Self {
+    pub fn unit_ass(self) -> Self {
         self.var(Assigment::Value(Value::Unit))
     }
     fn next_id(&mut self) -> Id {

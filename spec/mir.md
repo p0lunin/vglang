@@ -11,7 +11,7 @@ Possible statements is:
 1. Variable definition `<<vardef>> ::= "_" ID "=" <<ass>>`.
 2. Case expression `<<case>> ::= "case" ID ID "{" <<stmts>> "}"`.
 3. Return expression `<<ret>> ::= "ret" ID`.
-4. Dealloc `<<dealloc>> ::= "@dealloc" ID`. Note that `ID` must have pointer type.
+4. Dealloc `<<dealloc>> ::= "@dealloc" ID`. Note that `ID` must have pointer or enum type.
 
 ### Assigment
 Assigment expressions can be:
@@ -26,7 +26,7 @@ Assigment expressions can be:
 7. Allocating memory and putting variable into it `@alloc ID`.
 8. Dereference `"*" ID`. Puts value from a heap to the stack, so cannot be applied to the stacked values.
 9. Const value. Integer or unit value.
-10. Cloning of variable `"@clone" ID`.
+10. Cloning of variable `"@clone" ID`. Note that `ID` must have pointer type.
 
 ### Cloning semantic
 Main difference within cloning and simply copying is that value cloned _recursively_. E.g.

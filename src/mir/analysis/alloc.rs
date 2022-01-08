@@ -27,6 +27,12 @@ fn insert_heap_allocs_stmts(fc_args_count: u8, vars: Vec<Vty>, mut stmts: Vec<St
         out.push(Statement::Variable(v, ass))
     };
 
+    for id in 0..fc_args_count as usize {
+        if vars[id].location != Location::Stack {
+            refs.insert(Vid(id), smallvec![]);
+        }
+    }
+
     for i in 0..stmts.len() {
         match stmts[i].clone() {
             Statement::Variable(v, ass) => {
@@ -83,7 +89,7 @@ fn insert_heap_allocs_stmts(fc_args_count: u8, vars: Vec<Vty>, mut stmts: Vec<St
                                     }
                                 }
                                 ArgumentUsage::Unknown => {
-                                    let cloned_vid = Vid::new(arg.0 + this_offset + 1);
+                                    let cloned_vid = Vid(arg.0 + this_offset + 1);
                                     debug_assert_ne!(vars[arg.0].location, Location::Stack);
                                     refs.insert(cloned_vid, smallvec![*arg]);
                                     push_variable(Variable::new(vars[arg.0].clone(), cloned_vid), Assigment::Clone(*arg));
@@ -135,8 +141,14 @@ fn insert_heap_allocs_stmts(fc_args_count: u8, vars: Vec<Vty>, mut stmts: Vec<St
                 } else { smallvec![] };
                 let arguments_usage = {
                     let mut usage = smallvec![ArgumentUsage::NotUsed; fc_args_count as usize];
+
                     for v in args_depends {
                         usage[v as usize] = ArgumentUsage::Used;
+                    }
+                    for (i, arg) in usage.iter().enumerate() {
+                        if *arg == ArgumentUsage::NotUsed && vars[i].location != Location::Stack {
+                            out.push(Statement::Dealloc(Vid(i)));
+                        }
                     }
                     usage
                 };
@@ -248,6 +260,7 @@ fn find_roots(map: &HashMap<Vid, SmallVec<[Vid; 4]>>) -> Vec<Vid> {
     roots
 }
 
+#[derive(Debug, PartialEq)]
 struct FuncUsageResult {
     arguments_usage: SmallVec<[ArgumentUsage; 8]>,
 }
@@ -258,7 +271,7 @@ impl FuncUsageResult {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum ArgumentUsage {
     /// Argument not returned from the function.
     Used,
@@ -277,40 +290,40 @@ mod tests {
     #[test]
     fn find_leaves_test() {
         let mut map = HashMap::new();
-        map.insert(Vid::new(0), smallvec![]);
-        map.insert(Vid::new(1), smallvec![]);
-        map.insert(Vid::new(2), smallvec![]);
-        map.insert(Vid::new(3), smallvec![Vid::new(0)]);
-        map.insert(Vid::new(4), smallvec![Vid::new(3)]);
-        map.insert(Vid::new(5), smallvec![Vid::new(3), Vid::new(4)]);
-        map.insert(Vid::new(6), smallvec![Vid::new(1), Vid::new(2)]);
+        map.insert(Vid(0), smallvec![]);
+        map.insert(Vid(1), smallvec![]);
+        map.insert(Vid(2), smallvec![]);
+        map.insert(Vid(3), smallvec![Vid(0)]);
+        map.insert(Vid(4), smallvec![Vid(3)]);
+        map.insert(Vid(5), smallvec![Vid(3), Vid(4)]);
+        map.insert(Vid(6), smallvec![Vid(1), Vid(2)]);
         let test = |from: usize, expected: SmallVec<[Vid; 4]>| {
             let mut leaves = smallvec![];
-            find_leaves(&map, Vid::new(from), &mut leaves);
+            find_leaves(&map, Vid(from), &mut leaves);
             assert_eq!(leaves, expected);
         };
-        test(3, smallvec![Vid::new(0)]);
-        test(4, smallvec![Vid::new(0)]);
-        test(5, smallvec![Vid::new(0)]);
-        test(6, smallvec![Vid::new(1), Vid::new(2)]);
+        test(3, smallvec![Vid(0)]);
+        test(4, smallvec![Vid(0)]);
+        test(5, smallvec![Vid(0)]);
+        test(6, smallvec![Vid(1), Vid(2)]);
     }
 
     #[test]
     fn find_roots_test() {
         let mut map = HashMap::new();
-        map.insert(Vid::new(0), smallvec![]);
-        map.insert(Vid::new(1), smallvec![]);
-        map.insert(Vid::new(2), smallvec![Vid::new(0)]);
-        map.insert(Vid::new(3), smallvec![Vid::new(1)]);
-        map.insert(Vid::new(4), smallvec![Vid::new(2), Vid::new(3)]);
+        map.insert(Vid(0), smallvec![]);
+        map.insert(Vid(1), smallvec![]);
+        map.insert(Vid(2), smallvec![Vid(0)]);
+        map.insert(Vid(3), smallvec![Vid(1)]);
+        map.insert(Vid(4), smallvec![Vid(2), Vid(3)]);
 
-        map.insert(Vid::new(5), smallvec![]);
-        map.insert(Vid::new(6), smallvec![]);
-        map.insert(Vid::new(7), smallvec![Vid::new(5), Vid::new(6)]);
+        map.insert(Vid(5), smallvec![]);
+        map.insert(Vid(6), smallvec![]);
+        map.insert(Vid(7), smallvec![Vid(5), Vid(6)]);
 
-        map.insert(Vid::new(8), smallvec![]);
+        map.insert(Vid(8), smallvec![]);
 
-        let expected = vec![Vid::new(4), Vid::new(7), Vid::new(8)];
+        let expected = vec![Vid(4), Vid(7), Vid(8)];
         let roots = find_roots(&map);
         assert_eq!(expected, roots);
     }
@@ -320,17 +333,36 @@ mod tests {
         let ctx = Ctx::new();
         let (stmts, vars) = ProgramBuilder::new(&ctx, vec![])
             .int_ass(123) // _0
-            .alloc_ass(Vid::new(0)) // _1
+            .alloc_ass(Vid(0)) // _1
             .unit_ass() // _2
-            .return_(Vid::new(2));
+            .return_(Vid(2));
         let (expected, expected_vars) = ProgramBuilder::new(&ctx, vec![])
             .int_ass(123) // _0
-            .alloc_ass(Vid::new(0)) // _1
+            .alloc_ass(Vid(0)) // _1
             .unit_ass() // _2
             // NB: dealloc
-            .dealloc(Vid::new(1))
-            .return_(Vid::new(2));
+            .dealloc(Vid(1))
+            .return_(Vid(2));
         let (new_stmt, new_vars, _) = insert_heap_allocs_stmts(0, vars, stmts, &[]);
+
+        assert_eq!(expected, new_stmt);
+        assert_eq!(expected_vars, new_vars);
+    }
+
+    #[test]
+    fn insert_deallocs_on_arguments_test() {
+        let ctx = Ctx::new();
+        let (stmts, vars) = ProgramBuilder::new(&ctx, vec![Vty::heap(VtyKind::Int)])
+            // _0 = argument
+            .unit_ass() // _1
+            .return_(Vid(1));
+        let (expected, expected_vars) = ProgramBuilder::new(&ctx, vec![Vty::heap(VtyKind::Int)])
+            // _0 = argument
+            .unit_ass() // _1
+            // NB: dealloc
+            .dealloc(Vid(0))
+            .return_(Vid(1));
+        let (new_stmt, new_vars, _) = insert_heap_allocs_stmts(1, vars, stmts, &[]);
 
         assert_eq!(expected, new_stmt);
         assert_eq!(expected_vars, new_vars);
@@ -386,5 +418,46 @@ mod tests {
 
         assert_eq!(new_stmt, expected);
         assert_eq!(new_vars, expected_vars);
+    }
+
+    #[test]
+    fn func_usage_result_test() {
+        let mut ctx = Ctx::new();
+        ctx.enums.push(UserEnum::new(vec![
+            UserEnumVariant::new(vec![]),
+        ]));
+        let usages = vec![
+            FuncUsageResult::new(smallvec![ArgumentUsage::Unknown])
+        ];
+        // _0 = arg0
+        // _1 = arg1
+        // ret _1
+        let (stmts, vars) = ProgramBuilder::new(&ctx, vec![
+            Vty::heap(VtyKind::Int),
+            Vty::heap(VtyKind::Int),
+        ])
+            .return_(Vid(1));
+
+        // _0 = arg0
+        // _1 = arg1
+        // @dealloc _0 NB!
+        // ret _1
+        let (expected, expected_vars) = ProgramBuilder::new(&ctx, vec![
+            Vty::heap(VtyKind::Int),
+            Vty::heap(VtyKind::Int),
+        ])
+            .dealloc(Vid(0))
+            .return_(Vid(1));
+        let (new_stmt, new_vars, usage) = insert_heap_allocs_stmts(2, vars, stmts, &usages);
+
+        assert_eq!(new_stmt, expected);
+        assert_eq!(new_vars, expected_vars);
+        assert_eq!(
+            usage,
+            FuncUsageResult::new(smallvec![
+                ArgumentUsage::NotUsed,
+                ArgumentUsage::Used,
+            ])
+        )
     }
 }
