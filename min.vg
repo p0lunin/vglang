@@ -34,9 +34,8 @@ call x f = x `f` 1
 // -----------
 // call(_0: Int, _1: *func(Int, Int, Int)) -> Int
 // _2 = 1
-// _3 = @map[_0, _2]
-// _4 = @call _1 _3
-// ret _4
+// _3 = @call _1 (_0, _2)
+// ret _3
 
 let': Int -> Int
 let' x = let foo = x + 1 in foo + 1
@@ -99,13 +98,12 @@ gen x = case x == 0 of
 // case _2 _4 {
 //  _5 = 1
 //  _6 = _0 - _5
-//  _7 = @map[_6]
-//  _8 = gen
-//  _9 = @call _8 _7
-//  _10 = @alloc _9
-//  _11 = D[List.Cons]
-//  _12 = @map[_11 _0 _10] // List.Cons x gen(x - 1)
-//  ret _12
+//  _7 = gen
+//  _8 = @call _7 (_6)
+//  _9 = @alloc _8
+//  _10 = D[List.Cons]
+//  _11 = @map[_10 _0 _9] // List.Cons x gen(x - 1)
+//  ret _11
 // }
 //
 
