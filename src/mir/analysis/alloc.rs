@@ -5,31 +5,44 @@ use smallvec::SmallVec;
 use smallvec::smallvec;
 use itertools::Itertools;
 
+macro_rules! hash_set {
+    ( $( $x:expr ),* ) => {
+        {
+            let mut temp_set = HashSet::new();
+            $(
+                temp_set.insert($x);
+            )*
+            temp_set
+        }
+    };
+}
+
+
 pub fn insert_heap_allocs(ctx: Ctx) -> Ctx {
     todo!()
 }
 
-fn insert_heap_allocs_fn(mut fun: Function, usages: &[FuncUsageResult]) -> (Function, FuncUsageResult) {
-    let (stmts, vars, usage) = insert_heap_allocs_stmts(fun.args.len() as u8, fun.vars, fun.stmts, usages);
+fn insert_heap_allocs_fn(mut fun: Function, usages: &[FuncUsageResult], ctx: &Ctx) -> (Function, FuncUsageResult) {
+    let (stmts, vars, usage) = insert_heap_allocs_stmts(fun.args.len() as u8, fun.vars, fun.stmts, usages, ctx);
     fun.stmts = stmts;
     fun.vars = vars;
     (fun, usage)
 }
 
-fn insert_heap_allocs_stmts(fc_args_count: u8, vars: Vec<Vty>, mut stmts: Vec<Statement>, usages: &[FuncUsageResult])
+fn insert_heap_allocs_stmts(fc_args_count: u8, vars: Vec<Vty>, mut stmts: Vec<Statement>, usages: &[FuncUsageResult], ctx: &Ctx)
     -> (Vec<Statement>, Vec<Vty>, FuncUsageResult)
 {
     let mut out = vec![];
-    let mut allocated = SmallVec::<[Vid; 4]>::new();
-    let mut refs: HashMap<Vid, SmallVec<[Vid; 4]>> = HashMap::with_capacity(30);
+    let mut allocated = HashSet::<Vid>::with_capacity(30);
+    let mut refs: HashMap<Vid, HashSet<Vid>> = HashMap::with_capacity(30);
     let mut vars = vars;
     let mut push_variable = |v: Variable, ass: Assigment| {
         out.push(Statement::Variable(v, ass))
     };
 
     for id in 0..fc_args_count as usize {
-        if vars[id].location != Location::Stack {
-            refs.insert(Vid(id), smallvec![]);
+        if vars[id].must_be_deallocated(ctx) {
+            refs.insert(Vid(id), HashSet::with_capacity(10));
         }
     }
 
@@ -38,16 +51,16 @@ fn insert_heap_allocs_stmts(fc_args_count: u8, vars: Vec<Vty>, mut stmts: Vec<St
             Statement::Variable(v, ass) => {
                 match ass {
                     Assigment::Alloc(_) => {
-                        allocated.push(v.id);
-                        refs.insert(v.id, smallvec![]);
+                        allocated.insert(v.id);
+                        refs.insert(v.id, HashSet::new());
 
                         push_variable(v, ass);
                     }
                     Assigment::Map(_, _, ref m) => {
-                        let mut to_insert = smallvec![];
+                        let mut to_insert = HashSet::new();
                         for (reff, _) in refs.iter() {
                             if m.contains(reff) {
-                                to_insert.push(*reff);
+                                to_insert.insert(*reff);
                             }
                         }
                         if to_insert.len() > 0 {
@@ -70,6 +83,7 @@ fn insert_heap_allocs_stmts(fc_args_count: u8, vars: Vec<Vty>, mut stmts: Vec<St
                     }
                     Assigment::Field { .. } => {
                         /* we cannot get field from the pointer */
+                        // TODO: we can get heaped field so we must check this also
                         push_variable(v, ass);
                     }
                     Assigment::Call(func, arguments) => {
@@ -82,16 +96,12 @@ fn insert_heap_allocs_stmts(fc_args_count: u8, vars: Vec<Vty>, mut stmts: Vec<St
                             match usage {
                                 ArgumentUsage::Used => {
                                     new_arguments.push(*arg);
-                                    if let Some(_) = refs.iter().find(|(x, _)| *x == arg) {
-                                        refs.entry(v.id)
-                                            .or_default()
-                                            .push(*arg);
-                                    }
                                 }
                                 ArgumentUsage::Unknown => {
                                     let cloned_vid = Vid(arg.0 + this_offset + 1);
                                     debug_assert_ne!(vars[arg.0].location, Location::Stack);
-                                    refs.insert(cloned_vid, smallvec![*arg]);
+                                    // As I thought this isn't necessary because we clone value.
+                                    // refs.insert(cloned_vid, smallvec![*arg]);
                                     push_variable(Variable::new(vars[arg.0].clone(), cloned_vid), Assigment::Clone(*arg));
                                     this_offset += 1;
                                     new_arguments.push(cloned_vid);
@@ -103,7 +113,31 @@ fn insert_heap_allocs_stmts(fc_args_count: u8, vars: Vec<Vty>, mut stmts: Vec<St
                                 }
                             }
                         });
-                        push_variable(Variable::new(v.ty, Vid(v.id.0 + this_offset)), Assigment::Call(func, new_arguments));
+                        let return_vid = Vid(v.id.0 + this_offset);
+                        if v.ty.must_be_deallocated(ctx) {
+                            allocated.insert(return_vid);
+                            let used_values = usage.arguments_usage.iter()
+                                .zip(new_arguments.iter())
+                                .filter_map(|(usage, vid)| {
+                                    match usage {
+                                        ArgumentUsage::Used => {
+                                            if vars[vid.0].must_be_deallocated(ctx) {
+                                                Some(*vid)
+                                            } else {
+                                                None
+                                            }
+                                        }
+                                        _ => None,
+                                    }
+                                })
+                                .collect::<Vec<_>>();
+                            for used in &used_values {
+                                allocated.remove(&used);
+                                remove_refs_with_vid_as_leaf(&mut refs, *used);
+                            }
+                            refs.insert(return_vid, used_values.into_iter().collect());
+                        }
+                        push_variable(Variable::new(v.ty, return_vid), Assigment::Call(func, new_arguments));
                     }
                     Assigment::Dereference(_) => {
                         /* dereference does not create refs */
@@ -130,9 +164,8 @@ fn insert_heap_allocs_stmts(fc_args_count: u8, vars: Vec<Vty>, mut stmts: Vec<St
                                 // That means return value depends from the argument
                                 depends.push(leaf.0 as u8)
                             } else {
-                                let (idx, _) = allocated.iter().find_position(|x| *x == leaf)
-                                    .expect("Leaf can be only an input arg or an allocated var");
-                                allocated.remove(idx);
+                                allocated.remove(leaf);
+                                remove_refs_with_vid_as_leaf(&mut refs, *leaf);
                             }
                         }
                         depends
@@ -224,7 +257,28 @@ fn inc_statements_vids(stmts: &mut [Statement], from: usize) {
     }
 }
 
-fn find_leaves(map: &HashMap<Vid, SmallVec<[Vid; 4]>>, from: Vid, leaves: &mut SmallVec<[Vid; 4]>) {
+fn remove_refs_with_vid_as_leaf(map: &mut HashMap<Vid, HashSet<Vid>>, leaf: Vid) {
+    let mut to_remove = SmallVec::<[Vid; 10]>::new();
+    to_remove.push(leaf);
+    let mut i = 0_usize;
+    loop {
+        let must_be_remove = to_remove[i];
+        map.remove(&must_be_remove);
+        map.iter_mut().for_each(|(x, refs)| {
+            if refs.remove(&must_be_remove) {
+                if refs.len() == 0 {
+                    to_remove.push(*x);
+                }
+            }
+        });
+        i += 1;
+        if i == to_remove.len() {
+            break;
+        }
+    }
+}
+
+fn find_leaves(map: &HashMap<Vid, HashSet<Vid>>, from: Vid, leaves: &mut SmallVec<[Vid; 4]>) {
     let childs = map.get(&from).unwrap();
     if childs.is_empty() {
         if !leaves.contains(&from) {
@@ -237,7 +291,7 @@ fn find_leaves(map: &HashMap<Vid, SmallVec<[Vid; 4]>>, from: Vid, leaves: &mut S
         })
     }
 }
-
+/*
 fn find_roots(map: &HashMap<Vid, SmallVec<[Vid; 4]>>) -> Vec<Vid> {
     let mut have_parents: HashSet<&Vid> = HashSet::with_capacity(map.len());
     let mut possible_roots: HashSet<&Vid> = HashSet::with_capacity(map.len());
@@ -258,7 +312,7 @@ fn find_roots(map: &HashMap<Vid, SmallVec<[Vid; 4]>>) -> Vec<Vid> {
         .collect::<Vec<_>>();
     roots.sort();
     roots
-}
+}*/
 
 #[derive(Debug, PartialEq)]
 struct FuncUsageResult {
@@ -290,16 +344,17 @@ mod tests {
     #[test]
     fn find_leaves_test() {
         let mut map = HashMap::new();
-        map.insert(Vid(0), smallvec![]);
-        map.insert(Vid(1), smallvec![]);
-        map.insert(Vid(2), smallvec![]);
-        map.insert(Vid(3), smallvec![Vid(0)]);
-        map.insert(Vid(4), smallvec![Vid(3)]);
-        map.insert(Vid(5), smallvec![Vid(3), Vid(4)]);
-        map.insert(Vid(6), smallvec![Vid(1), Vid(2)]);
+        map.insert(Vid(0), hash_set![]);
+        map.insert(Vid(1), hash_set![]);
+        map.insert(Vid(2), hash_set![]);
+        map.insert(Vid(3), hash_set![Vid(0)]);
+        map.insert(Vid(4), hash_set![Vid(3)]);
+        map.insert(Vid(5), hash_set![Vid(3), Vid(4)]);
+        map.insert(Vid(6), hash_set![Vid(1), Vid(2)]);
         let test = |from: usize, expected: SmallVec<[Vid; 4]>| {
             let mut leaves = smallvec![];
             find_leaves(&map, Vid(from), &mut leaves);
+            leaves.sort();
             assert_eq!(leaves, expected);
         };
         test(3, smallvec![Vid(0)]);
@@ -307,7 +362,7 @@ mod tests {
         test(5, smallvec![Vid(0)]);
         test(6, smallvec![Vid(1), Vid(2)]);
     }
-
+/*
     #[test]
     fn find_roots_test() {
         let mut map = HashMap::new();
@@ -327,6 +382,21 @@ mod tests {
         let roots = find_roots(&map);
         assert_eq!(expected, roots);
     }
+*/
+    #[test]
+    fn remove_refs_with_vid_as_leaf_test() {
+        let mut map = HashMap::new();
+        map.insert(Vid(0), HashSet::new());
+        map.insert(Vid(1), HashSet::new());
+        map.insert(Vid(2), hash_set![Vid(0)]);
+        map.insert(Vid(3), hash_set![Vid(0), Vid(1)]);
+
+        remove_refs_with_vid_as_leaf(&mut map, Vid(0));
+        assert!(!map.contains_key(&Vid(0)));
+        assert!(map.contains_key(&Vid(1)));
+        assert!(!map.contains_key(&Vid(2)));
+        assert!(map.contains_key(&Vid(3)));
+    }
 
     #[test]
     fn insert_deallocs_test() {
@@ -343,7 +413,7 @@ mod tests {
             // NB: dealloc
             .dealloc(Vid(1))
             .return_(Vid(2));
-        let (new_stmt, new_vars, _) = insert_heap_allocs_stmts(0, vars, stmts, &[]);
+        let (new_stmt, new_vars, _) = insert_heap_allocs_stmts(0, vars, stmts, &[], &ctx);
 
         assert_eq!(expected, new_stmt);
         assert_eq!(expected_vars, new_vars);
@@ -362,7 +432,7 @@ mod tests {
             // NB: dealloc
             .dealloc(Vid(0))
             .return_(Vid(1));
-        let (new_stmt, new_vars, _) = insert_heap_allocs_stmts(1, vars, stmts, &[]);
+        let (new_stmt, new_vars, _) = insert_heap_allocs_stmts(1, vars, stmts, &[], &ctx);
 
         assert_eq!(expected, new_stmt);
         assert_eq!(expected_vars, new_vars);
@@ -414,7 +484,7 @@ mod tests {
             .unit_ass()
             .dealloc(Vid(2))
             .return_(Vid(5));
-        let (new_stmt, new_vars, _) = insert_heap_allocs_stmts(0, vars, stmts, &usages);
+        let (new_stmt, new_vars, _) = insert_heap_allocs_stmts(0, vars, stmts, &usages, &ctx);
 
         assert_eq!(new_stmt, expected);
         assert_eq!(new_vars, expected_vars);
@@ -423,12 +493,6 @@ mod tests {
     #[test]
     fn func_usage_result_test() {
         let mut ctx = Ctx::new();
-        ctx.enums.push(UserEnum::new(vec![
-            UserEnumVariant::new(vec![]),
-        ]));
-        let usages = vec![
-            FuncUsageResult::new(smallvec![ArgumentUsage::Unknown])
-        ];
         // _0 = arg0
         // _1 = arg1
         // ret _1
@@ -448,7 +512,7 @@ mod tests {
         ])
             .dealloc(Vid(0))
             .return_(Vid(1));
-        let (new_stmt, new_vars, usage) = insert_heap_allocs_stmts(2, vars, stmts, &usages);
+        let (new_stmt, new_vars, usage) = insert_heap_allocs_stmts(2, vars, stmts, &[], &ctx);
 
         assert_eq!(new_stmt, expected);
         assert_eq!(new_vars, expected_vars);
@@ -459,5 +523,53 @@ mod tests {
                 ArgumentUsage::Used,
             ])
         )
+    }
+
+    #[test]
+    fn returned_allocated_value_was_dealloc_if_not_used_test() {
+        let mut ctx = Ctx::new();
+        ctx.enums.push(UserEnum::new(vec![
+            UserEnumVariant::new(vec![Vty::heap(VtyKind::Int)]),
+        ]));
+        ctx.functions.push(Function::new(
+            vec![Variable::new(Vty::heap(VtyKind::Int), Vid(0)), ],
+            // Note that we test _stacked_ value, but enum contains heaped value,
+            // so it must be deallocated still.
+            Vty::stack(VtyKind::Enum(Eid(0))),
+            vec![], // does not important
+            vec![], // does not important
+        ));
+        let usages = vec![
+            FuncUsageResult::new(smallvec![ArgumentUsage::Used])
+        ];
+        // _0 = 5
+        // _1 = @alloc _0
+        // _2 = @call f0 (_1)
+        // _3 = ()
+        // ret _3
+        let (stmts, vars) = ProgramBuilder::new(&ctx, vec![])
+            .int_ass(5)
+            .alloc_ass(Vid(0))
+            .call_ass(Fid(0), vec![Vid(1)])
+            .unit_ass()
+            .return_(Vid(3));
+
+        // _0 = 5
+        // _1 = @alloc _0
+        // _2 = @call f0 (_1)
+        // _3 = ()
+        // @dealloc _2 NB!
+        // ret _3
+        let (expected, expected_vars) = ProgramBuilder::new(&ctx, vec![])
+            .int_ass(5)
+            .alloc_ass(Vid(0))
+            .call_ass(Fid(0), vec![Vid(1)])
+            .unit_ass()
+            .dealloc(Vid(2))
+            .return_(Vid(3));
+        let (new_stmt, new_vars, _) = insert_heap_allocs_stmts(0, vars, stmts, &usages, &ctx);
+
+        assert_eq!(new_stmt, expected);
+        assert_eq!(new_vars, expected_vars);
     }
 }

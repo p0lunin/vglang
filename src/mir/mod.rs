@@ -143,6 +143,14 @@ impl UserEnum {
     pub fn new(variants: Vec<UserEnumVariant>) -> Self {
         UserEnum { variants }
     }
+    pub fn must_be_deallocated(&self, ctx: &Ctx) -> bool {
+        for var in &self.variants {
+            for field in &var.fields {
+                if field.must_be_deallocated(ctx) { return true }
+            }
+        }
+        false
+    }
 }
 
 pub struct UserEnumVariant {
@@ -173,6 +181,18 @@ impl Vty {
     }
     pub fn rc(kind: VtyKind) -> Self {
         Vty { kind, location: Location::Rc }
+    }
+
+    pub fn must_be_deallocated(&self, ctx: &Ctx) -> bool {
+        if self.location != Location::Stack {
+            return true;
+        }
+        match self.kind {
+            VtyKind::Enum(e) => {
+                ctx.enum_(e).must_be_deallocated(ctx)
+            }
+            _ => false,
+        }
     }
 }
 
