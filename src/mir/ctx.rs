@@ -1,4 +1,4 @@
-use crate::mir::{Function, UserEnum, Vty, UserEnumVariant};
+use crate::mir::{Function, UserEnum, UserEnumVariant, Vty};
 
 pub type Id = usize;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -19,7 +19,11 @@ pub struct Ctx {
 
 impl Ctx {
     pub fn new() -> Self {
-        Ctx { functions: vec![], enums: vec![], main: Function::empty() }
+        Ctx {
+            functions: vec![],
+            enums: vec![],
+            main: Function::empty(),
+        }
     }
 }
 

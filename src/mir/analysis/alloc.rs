@@ -1,9 +1,11 @@
 use crate::mir::ctx::{Ctx, Fid};
-use crate::mir::{Function, Statement, Assigment, Vid, Location, Variable, VtyKind, Vty, DiscriminantOf, Case};
-use std::collections::{HashMap, HashSet};
-use smallvec::SmallVec;
-use smallvec::smallvec;
+use crate::mir::{
+    Assigment, Case, DiscriminantOf, Function, Location, Statement, Variable, Vid, Vty, VtyKind,
+};
 use itertools::Itertools;
+use smallvec::smallvec;
+use smallvec::SmallVec;
+use std::collections::{HashMap, HashSet};
 
 macro_rules! hash_set {
     ( $( $x:expr ),* ) => {
@@ -17,18 +19,17 @@ macro_rules! hash_set {
     };
 }
 
-
 pub fn insert_heap_allocs(ctx: Ctx) -> Ctx {
     todo!()
 }
 
-fn insert_heap_allocs_fn(mut fun: Function, usages: &[FuncUsageResult], ctx: &Ctx) -> (Function, FuncUsageResult) {
-    let (stmts, vars, usage) = insert_heap_allocs_stmts_first(
-        fun.args.len() as u8,
-        fun.vars, fun.stmts,
-        usages,
-        ctx
-    );
+fn insert_heap_allocs_fn(
+    mut fun: Function,
+    usages: &[FuncUsageResult],
+    ctx: &Ctx,
+) -> (Function, FuncUsageResult) {
+    let (stmts, vars, usage) =
+        insert_heap_allocs_stmts_first(fun.args.len() as u8, fun.vars, fun.stmts, usages, ctx);
     fun.stmts = stmts;
     fun.vars = vars;
     (fun, usage)
@@ -39,7 +40,7 @@ fn insert_heap_allocs_stmts_first(
     mut initial_vars: Vec<Vty>,
     initial_statements: Vec<Statement>,
     usages: &[FuncUsageResult],
-    ctx: &Ctx
+    ctx: &Ctx,
 ) -> (Vec<Statement>, Vec<Vty>, FuncUsageResult) {
     let mut allocated = HashSet::new();
     let mut refs = HashMap::new();
@@ -55,7 +56,7 @@ fn insert_heap_allocs_stmts_first(
         &mut allocated,
         &mut refs,
         usages,
-        ctx
+        ctx,
     );
     (stmts, initial_vars, usage)
 }
@@ -67,14 +68,10 @@ fn insert_heap_allocs_stmts(
     allocated: &mut HashSet<Vid>,
     refs: &mut HashMap<Vid, HashSet<Vid>>,
     usages: &[FuncUsageResult],
-    ctx: &Ctx
-)
-    -> (Vec<Statement>, FuncUsageResult)
-{
+    ctx: &Ctx,
+) -> (Vec<Statement>, FuncUsageResult) {
     let mut out = vec![];
-    let mut push_variable = |v: Variable, ass: Assigment| {
-        out.push(Statement::Variable(v, ass))
-    };
+    let mut push_variable = |v: Variable, ass: Assigment| out.push(Statement::Variable(v, ass));
 
     for i in 0..stmts.len() {
         match stmts[i].clone() {
@@ -122,45 +119,48 @@ fn insert_heap_allocs_stmts(
 
                         let mut new_arguments = Vec::with_capacity(arguments.len());
                         let mut this_offset = 0;
-                        usage.arguments_usage.iter().zip(arguments.iter()).for_each(|(usage, arg)| {
-                            match usage {
-                                ArgumentUsage::Used => {
-                                    new_arguments.push(*arg);
-                                }
-                                ArgumentUsage::Unknown => {
-                                    // TODO: it would be better if function to which pointer is
-                                    // passed will clone the values itself. In this case we do
-                                    // not clone value if it isn't necessary.
+                        usage.arguments_usage.iter().zip(arguments.iter()).for_each(
+                            |(usage, arg)| {
+                                match usage {
+                                    ArgumentUsage::Used => {
+                                        new_arguments.push(*arg);
+                                    }
+                                    ArgumentUsage::Unknown => {
+                                        // TODO: it would be better if function to which pointer is
+                                        // passed will clone the values itself. In this case we do
+                                        // not clone value if it isn't necessary.
 
-                                    let cloned_vid = Vid(arg.0 + this_offset + 1);
-                                    debug_assert_ne!(vars[arg.0].location, Location::Stack);
-                                    push_variable(Variable::new(vars[arg.0].clone(), cloned_vid), Assigment::Clone(*arg));
-                                    this_offset += 1;
-                                    new_arguments.push(cloned_vid);
-                                    vars.insert(cloned_vid.0, vars[arg.0].clone());
-                                    inc_statements_vids(&mut stmts[i..], v.id.0 + this_offset);
+                                        let cloned_vid = Vid(arg.0 + this_offset + 1);
+                                        debug_assert_ne!(vars[arg.0].location, Location::Stack);
+                                        push_variable(
+                                            Variable::new(vars[arg.0].clone(), cloned_vid),
+                                            Assigment::Clone(*arg),
+                                        );
+                                        this_offset += 1;
+                                        new_arguments.push(cloned_vid);
+                                        vars.insert(cloned_vid.0, vars[arg.0].clone());
+                                        inc_statements_vids(&mut stmts[i..], v.id.0 + this_offset);
+                                    }
+                                    ArgumentUsage::NotUsed => new_arguments.push(*arg),
                                 }
-                                ArgumentUsage::NotUsed => {
-                                    new_arguments.push(*arg)
-                                }
-                            }
-                        });
+                            },
+                        );
                         let return_vid = Vid(v.id.0 + this_offset);
                         if v.ty.must_be_deallocated(ctx) {
                             allocated.insert(return_vid);
-                            let used_values = usage.arguments_usage.iter()
+                            let used_values = usage
+                                .arguments_usage
+                                .iter()
                                 .zip(new_arguments.iter())
-                                .filter_map(|(usage, vid)| {
-                                    match usage {
-                                        ArgumentUsage::Used => {
-                                            if vars[vid.0].must_be_deallocated(ctx) {
-                                                Some(*vid)
-                                            } else {
-                                                None
-                                            }
+                                .filter_map(|(usage, vid)| match usage {
+                                    ArgumentUsage::Used => {
+                                        if vars[vid.0].must_be_deallocated(ctx) {
+                                            Some(*vid)
+                                        } else {
+                                            None
                                         }
-                                        _ => None,
                                     }
+                                    _ => None,
                                 })
                                 .collect::<Vec<_>>();
                             for used in &used_values {
@@ -169,7 +169,10 @@ fn insert_heap_allocs_stmts(
                             }
                             refs.insert(return_vid, used_values.into_iter().collect());
                         }
-                        push_variable(Variable::new(v.ty, return_vid), Assigment::Call(func, new_arguments));
+                        push_variable(
+                            Variable::new(v.ty, return_vid),
+                            Assigment::Call(func, new_arguments),
+                        );
                     }
                     Assigment::Dereference(_) => {
                         /* dereference does not create refs */
@@ -178,36 +181,46 @@ fn insert_heap_allocs_stmts(
                     Assigment::Value(_) => {
                         push_variable(v, ass);
                     }
-                    Assigment::Clone(_) => { unreachable!("There cannot be clone before this pass."); }
+                    Assigment::Clone(_) => {
+                        unreachable!("There cannot be clone before this pass.");
+                    }
                 }
             }
             Statement::Cases { matched, cases } => {
                 let mut cases_usages = vec![];
-                let new_cases = cases.into_iter().map(|mut case| {
-                    let Case {
-                        pattern, vars: mut case_vars, stmts: case_stmts
-                    } = case;
-                    let vars_count = vars.len();
+                let new_cases = cases
+                    .into_iter()
+                    .map(|mut case| {
+                        let Case {
+                            pattern,
+                            vars: mut case_vars,
+                            stmts: case_stmts,
+                        } = case;
+                        let vars_count = vars.len();
 
-                    vars.extend(case_vars);
-                    let (stmts, usage) = insert_heap_allocs_stmts(
-                        fc_args_count,
-                        vars,
-                        case_stmts,
-                        &mut allocated.clone(),
-                        &mut refs.clone(),
-                        usages,
-                        ctx,
-                    );
-                    cases_usages.push(usage);
-                    let new_vars = vars.drain(vars_count..).collect();
-                    Case {
-                        pattern,
-                        vars: new_vars,
-                        stmts
-                    }
-                }).collect();
-                out.push(Statement::Cases { matched, cases: new_cases });
+                        vars.extend(case_vars);
+                        let (stmts, usage) = insert_heap_allocs_stmts(
+                            fc_args_count,
+                            vars,
+                            case_stmts,
+                            &mut allocated.clone(),
+                            &mut refs.clone(),
+                            usages,
+                            ctx,
+                        );
+                        cases_usages.push(usage);
+                        let new_vars = vars.drain(vars_count..).collect();
+                        Case {
+                            pattern,
+                            vars: new_vars,
+                            stmts,
+                        }
+                    })
+                    .collect();
+                out.push(Statement::Cases {
+                    matched,
+                    cases: new_cases,
+                });
                 let usage = merge_func_usages(cases_usages);
                 return (out, usage);
             }
@@ -232,7 +245,9 @@ fn insert_heap_allocs_stmts(
                         depends
                     };
                     args_depends
-                } else { smallvec![] };
+                } else {
+                    smallvec![]
+                };
 
                 let mut deallocs = vec![];
 
@@ -253,12 +268,10 @@ fn insert_heap_allocs_stmts(
                     deallocs.push(*allocated_var);
                 }
                 deallocs.sort_by(|x, y| y.cmp(x));
-                deallocs.into_iter().for_each(|x| {
-                    out.push(Statement::Dealloc(x))
-                });
-                let usage_result = FuncUsageResult {
-                    arguments_usage
-                };
+                deallocs
+                    .into_iter()
+                    .for_each(|x| out.push(Statement::Dealloc(x)));
+                let usage_result = FuncUsageResult { arguments_usage };
                 out.push(Statement::Return(v));
                 return (out, usage_result); // return statement means there are no more statements
             }
@@ -272,23 +285,27 @@ fn insert_heap_allocs_stmts(
 }
 
 fn merge_func_usages(usages: Vec<FuncUsageResult>) -> FuncUsageResult {
-    usages.into_iter().fold1(|acc, usage| {
-        FuncUsageResult {
-            arguments_usage: acc.arguments_usage.into_iter().zip(usage.arguments_usage.into_iter()).map(|(acc, usage)| {
-                match acc {
+    usages
+        .into_iter()
+        .fold1(|acc, usage| FuncUsageResult {
+            arguments_usage: acc
+                .arguments_usage
+                .into_iter()
+                .zip(usage.arguments_usage.into_iter())
+                .map(|(acc, usage)| match acc {
                     ArgumentUsage::Unknown => ArgumentUsage::Unknown,
                     ArgumentUsage::Used => match usage {
                         ArgumentUsage::NotUsed | ArgumentUsage::Unknown => ArgumentUsage::Unknown,
                         ArgumentUsage::Used => ArgumentUsage::Used,
-                    }
+                    },
                     ArgumentUsage::NotUsed => match usage {
                         ArgumentUsage::Used | ArgumentUsage::Unknown => ArgumentUsage::Unknown,
                         ArgumentUsage::NotUsed => ArgumentUsage::NotUsed,
-                    }
-                }
-            }).collect()
-        }
-    }).unwrap()
+                    },
+                })
+                .collect(),
+        })
+        .unwrap()
 }
 
 fn inc_statements_vids(stmts: &mut [Statement], from: usize) {
@@ -303,17 +320,11 @@ fn inc_statements_vids(stmts: &mut [Statement], from: usize) {
                 inc_vid(&mut v.id);
                 match x {
                     Assigment::Function(_) => {}
-                    Assigment::Discriminant(d) => {
-                        match d {
-                            DiscriminantOf::Variable(v) => {
-                                inc_vid(v)
-                            },
-                            _ => {}
-                        }
-                    }
-                    Assigment::Field { var, .. } => {
-                        inc_vid(var)
-                    }
+                    Assigment::Discriminant(d) => match d {
+                        DiscriminantOf::Variable(v) => inc_vid(v),
+                        _ => {}
+                    },
+                    Assigment::Field { var, .. } => inc_vid(var),
                     Assigment::Map(_, v, vids) => {
                         inc_vid(v);
                         vids.iter_mut().for_each(|v| inc_vid(v));
@@ -321,17 +332,13 @@ fn inc_statements_vids(stmts: &mut [Statement], from: usize) {
                     Assigment::Call(_, vids) => {
                         vids.iter_mut().for_each(|v| inc_vid(v));
                     }
-                    Assigment::Alloc(vid) => {
-                        inc_vid(vid)
+                    Assigment::Alloc(vid) => inc_vid(vid),
+                    Assigment::BinOp(_, _, _) => {
+                        unimplemented!()
                     }
-                    Assigment::BinOp(_, _, _) => { unimplemented!() }
-                    Assigment::Dereference(vid) => {
-                        inc_vid(vid)
-                    }
+                    Assigment::Dereference(vid) => inc_vid(vid),
                     Assigment::Value(_) => {}
-                    Assigment::Clone(vid) => {
-                        inc_vid(vid)
-                    }
+                    Assigment::Clone(vid) => inc_vid(vid),
                 }
             }
             Statement::Cases { matched, cases } => {
@@ -340,12 +347,8 @@ fn inc_statements_vids(stmts: &mut [Statement], from: usize) {
                     inc_statements_vids(&mut case.stmts, from);
                 }
             }
-            Statement::Return(vid) => {
-                inc_vid(vid)
-            }
-            Statement::Dealloc(vid) => {
-                inc_vid(vid)
-            }
+            Statement::Return(vid) => inc_vid(vid),
+            Statement::Dealloc(vid) => inc_vid(vid),
         }
     }
 }
@@ -431,8 +434,10 @@ enum ArgumentUsage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mir::{Vty, ProgramBuilder, VtyKind, UserEnum, UserEnumVariant, EnumVariantDiscriminant};
     use crate::mir::ctx::Eid;
+    use crate::mir::{
+        EnumVariantDiscriminant, ProgramBuilder, UserEnum, UserEnumVariant, Vty, VtyKind,
+    };
 
     #[test]
     fn find_leaves_test() {
@@ -455,27 +460,27 @@ mod tests {
         test(5, smallvec![Vid(0)]);
         test(6, smallvec![Vid(1), Vid(2)]);
     }
-/*
-    #[test]
-    fn find_roots_test() {
-        let mut map = HashMap::new();
-        map.insert(Vid(0), smallvec![]);
-        map.insert(Vid(1), smallvec![]);
-        map.insert(Vid(2), smallvec![Vid(0)]);
-        map.insert(Vid(3), smallvec![Vid(1)]);
-        map.insert(Vid(4), smallvec![Vid(2), Vid(3)]);
+    /*
+        #[test]
+        fn find_roots_test() {
+            let mut map = HashMap::new();
+            map.insert(Vid(0), smallvec![]);
+            map.insert(Vid(1), smallvec![]);
+            map.insert(Vid(2), smallvec![Vid(0)]);
+            map.insert(Vid(3), smallvec![Vid(1)]);
+            map.insert(Vid(4), smallvec![Vid(2), Vid(3)]);
 
-        map.insert(Vid(5), smallvec![]);
-        map.insert(Vid(6), smallvec![]);
-        map.insert(Vid(7), smallvec![Vid(5), Vid(6)]);
+            map.insert(Vid(5), smallvec![]);
+            map.insert(Vid(6), smallvec![]);
+            map.insert(Vid(7), smallvec![Vid(5), Vid(6)]);
 
-        map.insert(Vid(8), smallvec![]);
+            map.insert(Vid(8), smallvec![]);
 
-        let expected = vec![Vid(4), Vid(7), Vid(8)];
-        let roots = find_roots(&map);
-        assert_eq!(expected, roots);
-    }
-*/
+            let expected = vec![Vid(4), Vid(7), Vid(8)];
+            let roots = find_roots(&map);
+            assert_eq!(expected, roots);
+        }
+    */
     #[test]
     fn remove_refs_with_vid_as_leaf_test() {
         let mut map = HashMap::new();
@@ -534,18 +539,15 @@ mod tests {
     #[test]
     fn insert_clones_test() {
         let mut ctx = Ctx::new();
-        ctx.enums.push(UserEnum::new(vec![
-            UserEnumVariant::new(vec![]),
-        ]));
+        ctx.enums
+            .push(UserEnum::new(vec![UserEnumVariant::new(vec![])]));
         ctx.functions.push(Function::new(
             vec![Variable::new(Vty::heap(VtyKind::Enum(Eid(0))), Vid(0))],
             Vty::unit(),
             vec![], // does not important
             vec![], // does not important
         ));
-        let usages = vec![
-            FuncUsageResult::new(smallvec![ArgumentUsage::Unknown])
-        ];
+        let usages = vec![FuncUsageResult::new(smallvec![ArgumentUsage::Unknown])];
         // _0 = D[..]
         // _1 = @map[_0]
         // _2 = @alloc _1
@@ -553,7 +555,10 @@ mod tests {
         // _4 = ()
         // ret _4
         let (stmts, vars) = ProgramBuilder::new(&ctx, vec![])
-            .discriminant_ass(DiscriminantOf::UserEnumField(EnumVariantDiscriminant::new(Eid(0), 0)))
+            .discriminant_ass(DiscriminantOf::UserEnumField(EnumVariantDiscriminant::new(
+                Eid(0),
+                0,
+            )))
             .map_ass(Eid(0), Vid(0), vec![])
             .alloc_ass(Vid(1))
             .call_ass(Fid(0), vec![Vid(2)])
@@ -569,7 +574,10 @@ mod tests {
         // @dealloc _2 NB!
         // ret _5
         let (expected, expected_vars) = ProgramBuilder::new(&ctx, vec![])
-            .discriminant_ass(DiscriminantOf::UserEnumField(EnumVariantDiscriminant::new(Eid(0), 0)))
+            .discriminant_ass(DiscriminantOf::UserEnumField(EnumVariantDiscriminant::new(
+                Eid(0),
+                0,
+            )))
             .map_ass(Eid(0), Vid(0), vec![])
             .alloc_ass(Vid(1))
             .clone_ass(Vid(2))
@@ -589,52 +597,44 @@ mod tests {
         // _0 = arg0
         // _1 = arg1
         // ret _1
-        let (stmts, vars) = ProgramBuilder::new(&ctx, vec![
-            Vty::heap(VtyKind::Int),
-            Vty::heap(VtyKind::Int),
-        ])
-            .return_(Vid(1));
+        let (stmts, vars) =
+            ProgramBuilder::new(&ctx, vec![Vty::heap(VtyKind::Int), Vty::heap(VtyKind::Int)])
+                .return_(Vid(1));
 
         // _0 = arg0
         // _1 = arg1
         // @dealloc _0 NB!
         // ret _1
-        let (expected, expected_vars) = ProgramBuilder::new(&ctx, vec![
-            Vty::heap(VtyKind::Int),
-            Vty::heap(VtyKind::Int),
-        ])
-            .dealloc(Vid(0))
-            .return_(Vid(1));
+        let (expected, expected_vars) =
+            ProgramBuilder::new(&ctx, vec![Vty::heap(VtyKind::Int), Vty::heap(VtyKind::Int)])
+                .dealloc(Vid(0))
+                .return_(Vid(1));
         let (new_stmt, new_vars, usage) = insert_heap_allocs_stmts_first(2, vars, stmts, &[], &ctx);
 
         assert_eq!(new_stmt, expected);
         assert_eq!(new_vars, expected_vars);
         assert_eq!(
             usage,
-            FuncUsageResult::new(smallvec![
-                ArgumentUsage::NotUsed,
-                ArgumentUsage::Used,
-            ])
+            FuncUsageResult::new(smallvec![ArgumentUsage::NotUsed, ArgumentUsage::Used,])
         )
     }
 
     #[test]
     fn returned_allocated_value_was_dealloc_if_not_used_test() {
         let mut ctx = Ctx::new();
-        ctx.enums.push(UserEnum::new(vec![
-            UserEnumVariant::new(vec![Vty::heap(VtyKind::Int)]),
-        ]));
+        ctx.enums
+            .push(UserEnum::new(vec![UserEnumVariant::new(vec![Vty::heap(
+                VtyKind::Int,
+            )])]));
         ctx.functions.push(Function::new(
-            vec![Variable::new(Vty::heap(VtyKind::Int), Vid(0)), ],
+            vec![Variable::new(Vty::heap(VtyKind::Int), Vid(0))],
             // Note that we test _stacked_ value, but enum contains heaped value,
             // so it must be deallocated still.
             Vty::stack(VtyKind::Enum(Eid(0))),
             vec![], // does not important
             vec![], // does not important
         ));
-        let usages = vec![
-            FuncUsageResult::new(smallvec![ArgumentUsage::Used])
-        ];
+        let usages = vec![FuncUsageResult::new(smallvec![ArgumentUsage::Used])];
         // _0 = 5
         // _1 = @alloc _0
         // _2 = @call f0 (_1)
@@ -681,15 +681,24 @@ mod tests {
         //   ret _3
         //  }
         // }
-        let (stmts, vars) = ProgramBuilder::new(&ctx, vec![
-            Vty::heap(VtyKind::Int),
-            Vty::heap(VtyKind::Int),
-            Vty::heap(VtyKind::Int),
-        ])
-            .cases(Vid(0), vec![
+        let (stmts, vars) = ProgramBuilder::new(
+            &ctx,
+            vec![
+                Vty::heap(VtyKind::Int),
+                Vty::heap(VtyKind::Int),
+                Vty::heap(VtyKind::Int),
+            ],
+        )
+        .cases(
+            Vid(0),
+            vec![
                 Case::new(Vid(0), ProgramBuilder::new(&ctx, vec![]).return_(Vid(1))),
-                Case::new(Vid(0), ProgramBuilder::new(&ctx, vec![]).unit_ass().return_(Vid(3))),
-            ]);
+                Case::new(
+                    Vid(0),
+                    ProgramBuilder::new(&ctx, vec![]).unit_ass().return_(Vid(3)),
+                ),
+            ],
+        );
 
         // _0 = arg1
         // _1 = arg2
@@ -708,18 +717,23 @@ mod tests {
         //   ret _3
         //  }
         // }
-        let (expected, expected_vars) = ProgramBuilder::new(&ctx, vec![
-            Vty::heap(VtyKind::Int),
-            Vty::heap(VtyKind::Int),
-            Vty::heap(VtyKind::Int),
-        ])
-            .cases(Vid(0), vec![
+        let (expected, expected_vars) = ProgramBuilder::new(
+            &ctx,
+            vec![
+                Vty::heap(VtyKind::Int),
+                Vty::heap(VtyKind::Int),
+                Vty::heap(VtyKind::Int),
+            ],
+        )
+        .cases(
+            Vid(0),
+            vec![
                 Case::new(
                     Vid(0),
                     ProgramBuilder::new(&ctx, vec![])
                         .dealloc(Vid(2))
                         .dealloc(Vid(0))
-                        .return_(Vid(1))
+                        .return_(Vid(1)),
                 ),
                 Case::new(
                     Vid(0),
@@ -728,9 +742,10 @@ mod tests {
                         .dealloc(Vid(2))
                         .dealloc(Vid(1))
                         .dealloc(Vid(0))
-                        .return_(Vid(3))
+                        .return_(Vid(3)),
                 ),
-            ]);
+            ],
+        );
         let (new_stmt, new_vars, usage) = insert_heap_allocs_stmts_first(3, vars, stmts, &[], &ctx);
 
         assert_eq!(new_stmt, expected);

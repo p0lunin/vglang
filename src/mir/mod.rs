@@ -1,8 +1,8 @@
-mod ctx;
 mod analysis;
+mod ctx;
 
 use crate::common::BinOp;
-use crate::mir::ctx::{Id, Eid, Fid, Ctx};
+use crate::mir::ctx::{Ctx, Eid, Fid, Id};
 
 #[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub struct Vid(pub Id); // variable
@@ -16,10 +16,20 @@ pub struct Function {
 
 impl Function {
     pub fn new(args: Vec<Variable>, out_ty: Vty, vars: Vec<Vty>, stmts: Vec<Statement>) -> Self {
-        Function { args, out_ty, vars, stmts }
+        Function {
+            args,
+            out_ty,
+            vars,
+            stmts,
+        }
     }
     pub fn empty() -> Self {
-        Function { args: vec![], vars: vec![], out_ty: Vty::stack(VtyKind::Discriminant), stmts: vec![] }
+        Function {
+            args: vec![],
+            vars: vec![],
+            out_ty: Vty::stack(VtyKind::Discriminant),
+            stmts: vec![],
+        }
     }
 }
 
@@ -38,10 +48,7 @@ impl Variable {
 #[derive(Debug, PartialEq, Clone)]
 pub enum Statement {
     Variable(Variable, Assigment),
-    Cases {
-        matched: Vid,
-        cases: Vec<Case>,
-    },
+    Cases { matched: Vid, cases: Vec<Case> },
     Return(Vid),
     Dealloc(Vid),
 }
@@ -55,7 +62,11 @@ pub struct Case {
 
 impl Case {
     pub fn new(pattern: Vid, program: (Vec<Statement>, Vec<Vty>)) -> Self {
-        Case { pattern, vars: program.1, stmts: program.0 }
+        Case {
+            pattern,
+            vars: program.1,
+            stmts: program.0,
+        }
     }
 }
 
@@ -100,12 +111,10 @@ impl Assigment {
                 let fty = ctx.function(*f);
                 Vty::heap(VtyKind::Function {
                     args: fty.args.iter().map(|x| x.ty.clone()).collect(),
-                    output: Box::new(fty.out_ty.clone())
+                    output: Box::new(fty.out_ty.clone()),
                 })
             }
-            Assigment::Discriminant(_) => {
-                Vty::stack(VtyKind::Discriminant)
-            }
+            Assigment::Discriminant(_) => Vty::stack(VtyKind::Discriminant),
             Assigment::Field {
                 r#enum,
                 variant,
@@ -115,12 +124,8 @@ impl Assigment {
                 let variant = ctx.enum_variant(*r#enum, *variant);
                 variant.fields[*field as usize].clone()
             }
-            Assigment::Map(e, _, _) => {
-                Vty::stack(VtyKind::Enum(*e))
-            }
-            Assigment::Call(f, _) => {
-                ctx.function(*f).out_ty.clone()
-            }
+            Assigment::Map(e, _, _) => Vty::stack(VtyKind::Enum(*e)),
+            Assigment::Call(f, _) => ctx.function(*f).out_ty.clone(),
             Assigment::Alloc(v) => {
                 debug_assert_eq!(vars[v.0].location, Location::Stack);
                 Vty::heap(vars[v.0].kind.clone())
@@ -134,7 +139,9 @@ impl Assigment {
             }
             Assigment::Value(v) => Vty::stack(v.ty()),
             Assigment::Clone(v) => {
-                debug_assert!(vars[v.0].location == Location::Heap || vars[v.0].location == Location::Rc);
+                debug_assert!(
+                    vars[v.0].location == Location::Heap || vars[v.0].location == Location::Rc
+                );
                 Vty::heap(vars[v.0].kind.clone())
             }
         }
@@ -160,7 +167,7 @@ impl EnumVariantDiscriminant {
 }
 
 pub struct UserEnum {
-    variants: Vec<UserEnumVariant>
+    variants: Vec<UserEnumVariant>,
 }
 
 impl UserEnum {
@@ -170,7 +177,9 @@ impl UserEnum {
     pub fn must_be_deallocated(&self, ctx: &Ctx) -> bool {
         for var in &self.variants {
             for field in &var.fields {
-                if field.must_be_deallocated(ctx) { return true }
+                if field.must_be_deallocated(ctx) {
+                    return true;
+                }
             }
         }
         false
@@ -195,16 +204,28 @@ pub struct Vty {
 
 impl Vty {
     pub fn unit() -> Self {
-        Vty { kind: VtyKind::Unit, location: Location::Stack }
+        Vty {
+            kind: VtyKind::Unit,
+            location: Location::Stack,
+        }
     }
     pub fn stack(kind: VtyKind) -> Self {
-        Vty { kind, location: Location::Stack }
+        Vty {
+            kind,
+            location: Location::Stack,
+        }
     }
     pub fn heap(kind: VtyKind) -> Self {
-        Vty { kind, location: Location::Heap }
+        Vty {
+            kind,
+            location: Location::Heap,
+        }
     }
     pub fn rc(kind: VtyKind) -> Self {
-        Vty { kind, location: Location::Rc }
+        Vty {
+            kind,
+            location: Location::Rc,
+        }
     }
 
     pub fn must_be_deallocated(&self, ctx: &Ctx) -> bool {
@@ -212,9 +233,7 @@ impl Vty {
             return true;
         }
         match self.kind {
-            VtyKind::Enum(e) => {
-                ctx.enum_(e).must_be_deallocated(ctx)
-            }
+            VtyKind::Enum(e) => ctx.enum_(e).must_be_deallocated(ctx),
             _ => false,
         }
     }
@@ -246,10 +265,20 @@ pub struct ProgramBuilder<'a> {
 impl<'a> ProgramBuilder<'a> {
     pub fn new(ctx: &'a Ctx, args: Vec<Vty>) -> Self {
         let current_var = args.len();
-        Self { ctx, statements: vec![], vars: args, current_var }
+        Self {
+            ctx,
+            statements: vec![],
+            vars: args,
+            current_var,
+        }
     }
     pub fn case_arm(ctx: &'a Ctx, vars_len: usize) -> Self {
-        Self { ctx, statements: vec![], vars: vec![], current_var: vars_len }
+        Self {
+            ctx,
+            statements: vec![],
+            vars: vec![],
+            current_var: vars_len,
+        }
     }
     fn add(mut self, stmt: Statement) -> Self {
         self.statements.push(stmt);
