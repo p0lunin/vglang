@@ -38,13 +38,25 @@ impl Variable {
 #[derive(Debug, PartialEq, Clone)]
 pub enum Statement {
     Variable(Variable, Assigment),
-    Case {
+    Cases {
         matched: Vid,
-        pattern: Vid,
-        stmts: Vec<Statement>,
+        cases: Vec<Case>,
     },
     Return(Vid),
     Dealloc(Vid),
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct Case {
+    pub pattern: Vid,
+    pub vars: Vec<Vty>,
+    pub stmts: Vec<Statement>,
+}
+
+impl Case {
+    pub fn new(pattern: Vid, program: (Vec<Statement>, Vec<Vty>)) -> Self {
+        Case { pattern, vars: program.1, stmts: program.0 }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -132,7 +144,19 @@ impl Assigment {
 #[derive(Debug, PartialEq, Clone)]
 pub enum DiscriminantOf {
     Variable(Vid),
-    UserEnumField(Eid, u8),
+    UserEnumField(EnumVariantDiscriminant),
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct EnumVariantDiscriminant {
+    pub r#enum: Eid,
+    pub field: u8,
+}
+
+impl EnumVariantDiscriminant {
+    pub fn new(r#enum: Eid, field: u8) -> Self {
+        EnumVariantDiscriminant { r#enum, field }
+    }
 }
 
 pub struct UserEnum {
@@ -224,6 +248,9 @@ impl<'a> ProgramBuilder<'a> {
         let current_var = args.len();
         Self { ctx, statements: vec![], vars: args, current_var }
     }
+    pub fn case_arm(ctx: &'a Ctx, vars_len: usize) -> Self {
+        Self { ctx, statements: vec![], vars: vec![], current_var: vars_len }
+    }
     fn add(mut self, stmt: Statement) -> Self {
         self.statements.push(stmt);
         self
@@ -240,6 +267,10 @@ impl<'a> ProgramBuilder<'a> {
     }
     pub fn dealloc(self, id: Vid) -> Self {
         self.add(Statement::Dealloc(id))
+    }
+    pub fn cases(self, matched: Vid, cases: Vec<Case>) -> (Vec<Statement>, Vec<Vty>) {
+        let this = self.add(Statement::Cases { matched, cases });
+        (this.statements, this.vars)
     }
     pub fn function_ass(self, id: Fid) -> Self {
         self.var(Assigment::Function(id))
